@@ -1,7 +1,7 @@
 import { getSQLTradesPool } from "../../../../../lib/db/sql";
 import type { Pool, RowDataPacket } from "mysql2/promise";
 import { getTableName } from "./accounts_json";
-import { localMidnightToUtc, offsetHHMMSS, tzOffsetHours } from "./time_tz";
+import { localMidnightToUtc, offsetHHMMSS, tzOffsetHours } from "./z_time_tz";
 import { DailyRow } from "../metrics/types";
 
 interface MtdRow extends RowDataPacket {

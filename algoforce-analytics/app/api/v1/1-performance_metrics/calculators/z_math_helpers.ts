@@ -1,7 +1,8 @@
 import { readBaselineUsd } from "@/lib/baseline";
 import { DailyReturnDollars, DailyRow, DrawdownBlock, DrawdownPeriod, EquityPoint, MetricConfig, MetricsPayload, RolledRow, Streaks } from "../metrics/types";
-import { earliestLocalDateForAccount, fetchDailyRows, fetchMTD, fetchTradeCount, findEarliestLocalDateForAccounts, findLatestLocalDateForAccounts, latestLocalDateForAccount } from "./sql_fetch_modify";
-import { addDaysISODate, diffDaysInclusive, fmtISO, localTodayISO, resolveAsOf, startOfMonthISO } from "./time_tz";
+import { earliestLocalDateForAccount, fetchDailyRows, fetchMTD, fetchTradeCount, findEarliestLocalDateForAccounts, findLatestLocalDateForAccounts, latestLocalDateForAccount } from "./z_sql_fetch_modify";
+import { addDaysISODate, diffDaysInclusive, fmtISO, localTodayISO, resolveAsOf, startOfMonthISO } from "./z_time_tz";
+import { consecutiveLosingDays } from "./consecutive_losing_days";
 
 function rollBalances(daily: DailyRow[], initial: number): RolledRow[] {
   let cur = initial;
@@ -80,31 +81,6 @@ function drawdownStats(eq: EquityPoint[]): {
       peak_day: peakDay,
       trough_day: troughDay,
       recovery_day: recoveryDay,
-    },
-  };
-}
-
-/* ========================== math helpers ========================== */
-
-function consecutiveLosingDays(daily: DailyRow[], threshold = 4): Streaks {
-  let maxStreak = 0;
-  let cur = 0;
-  for (const r of daily ?? []) {
-    if (r.net_pnl < 0) {
-      cur++;
-      if (cur > maxStreak) maxStreak = cur;
-    } else cur = 0;
-  }
-  let currentStreak = 0;
-  for (let i = (daily?.length ?? 0) - 1; i >= 0; i--) {
-    if (daily![i].net_pnl < 0) currentStreak++;
-    else break;
-  }
-  return {
-    consecutive_losing_days: {
-      max_streak: maxStreak,
-      meets_threshold: maxStreak >= threshold,
-      current_streak: currentStreak,
     },
   };
 }
@@ -201,13 +177,6 @@ export async function computeAccountMetrics(
   const { block: ddAll, period: ddPeriod } = drawdownStats(eqAll);
   const { block: ddMtd } = drawdownStats(equitySeries(mtdRolled));
 
-  // Win rates
-//   const wrAll = await fetchWinRates(accountKey);
-  const start30ISO = addDaysISODate(endISO!, -29);
-  const last30 = await fetchDailyRows(accountKey, tz, start30ISO, endExclusive);
-  const posDays = last30.filter((d) => d.net_pnl > 0).length;
-  const wr30 = last30.length ? (100 * posDays) / last30.length : null;
-
   const tradesCount = await fetchTradeCount(accountKey);
   const streaks = consecutiveLosingDays(
     mtdDaily.length ? mtdDaily : dailyWindow,
@@ -255,10 +224,6 @@ export async function computeAccountMetrics(
     },
     drawdowns: ddAll,
     drawdown_period: ddPeriod,
-    // win_rates: {
-    //   rolling_30d_win_rate_pct: wr30 == null ? null : Number(wr30.toFixed(8)),
-    //   win_rate_from_run_start_pct: wrAll.win_rate_from_run_start_pct,
-    // },
     counts: { number_of_trades_total: tradesCount },
     streaks,
     daily_return_dollars,
