@@ -1,8 +1,8 @@
-// src/lib/redis.ts
+// algoforce-analytics\lib\db\redis.ts
 import Redis from "ioredis";
 
 /* ---------------------------------------------------------------
-   A SINGLE process-wide Redis connection that survives hot reload
+   A SINGLE process-wide Redis connection that survives hot reload > 
 ---------------------------------------------------------------- */
 declare global {
   var _afRedis: Redis | undefined;

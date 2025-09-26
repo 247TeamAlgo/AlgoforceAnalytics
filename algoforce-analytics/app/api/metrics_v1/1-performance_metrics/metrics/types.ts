@@ -1,4 +1,5 @@
-// app/api/v1/1-performance_metrics/metrics/types.ts
+// algoforce-analytics\app\api\metrics_v1\1-performance_metrics\metrics\types.ts
+
 export type AccountKey = import("../../../../../lib/accounts").AccountKey;
 
 /* Redis payloads */
@@ -99,6 +100,9 @@ export type Trade = {
   entry_price_1?: number;
   exit_price_1?: number;
 };
+
+
+// lib/types.ts
 
 export type ISODate = string; // "YYYY-MM-DD"
 
