@@ -8,8 +8,6 @@ import {
   XAxis,
   YAxis,
   ReferenceLine,
-  ReferenceArea, // ← add
-  Cell,
   LabelList,
 } from "recharts";
 import {
@@ -28,12 +26,8 @@ import {
 import type { MetricsPayload, HistoricalBucket } from "../../lib/types";
 import { fmtUsd } from "../../lib/types";
 
-type Row = {
-  label: string;
-  pos: number;
-  neg: number;
-  total: number;
-};
+type Row = { label: string; total: number };
+type DivergingRow = { label: string; pos: number; neg: number; total: number };
 
 type LabelRenderProps = {
   x?: number;
@@ -41,110 +35,83 @@ type LabelRenderProps = {
   width?: number;
   height?: number;
   value?: number | string;
-  payload?: Row;
 };
 
 const chartConfig: ChartConfig = {
-  total: { label: "Net PnL", color: "var(--chart-1)" },
+  pos: { label: "Profit", color: "var(--chart-2)" }, // green
+  neg: { label: "Loss", color: "var(--chart-1)" }, // red
 };
-
-const GREEN = "var(--chart-2)";
-const RED = "var(--chart-1)";
-
-function useMeasure<T extends HTMLElement>(): [
-  React.MutableRefObject<T | null>,
-  { width: number; height: number },
-] {
-  const ref = React.useRef<T>(null);
-  const [size, setSize] = React.useState({ width: 0, height: 0 });
-  React.useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const ro = new ResizeObserver((entries) => {
-      const cr = entries[0]?.contentRect;
-      if (cr) setSize({ width: cr.width, height: cr.height });
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  return [ref, size];
-}
 
 function build(merged: MetricsPayload, topN = 12): Row[] {
   const buckets: HistoricalBucket[] | undefined = merged.historical?.perSymbol;
   if (!buckets?.length) return [];
-  const rows = buckets.map((b) => {
-    const pos = Math.max(0, Number(b.pnl_pos.toFixed(2)));
-    const negMag = Math.max(0, Math.abs(Number(b.pnl_neg.toFixed(2))));
-    const neg = -negMag;
-    const total = Number((pos + neg).toFixed(2));
-    return { label: b.label, pos, neg, total };
-  });
-  return rows
+  return [...buckets]
+    .map((b) => ({
+      label: b.label,
+      total: Number((b.pnl_pos + b.pnl_neg).toFixed(2)),
+    }))
     .sort((a, b) => Math.abs(b.total) - Math.abs(a.total))
     .slice(0, topN);
 }
 
-function leftLossLabel(props: LabelRenderProps) {
-  const { x = 0, y = 0, height = 0, payload } = props;
-  const row = payload as Row | undefined;
-  if (!row || row.neg === 0) return null;
-  const cy = y + height / 2;
+function toDiverging(rows: Row[]): DivergingRow[] {
+  return rows.map((r) => ({
+    label: r.label,
+    pos: r.total > 0 ? r.total : 0,
+    neg: r.total < 0 ? r.total : 0, // keep negative for left-extend
+    total: r.total,
+  }));
+}
+
+function maxAbsDomain(rows: DivergingRow[]): [number, number] {
+  let m = 0;
+  for (const r of rows) {
+    const a = Math.abs(r.total);
+    if (a > m) m = a;
+  }
+  m = Math.ceil(m * 1.1); // headroom
+  return [-m, m];
+}
+
+/** Value labels outside the bar ends; left for negatives, right for positives */
+function DivergingValueLabel(raw: unknown) {
+  const props = raw as LabelRenderProps;
+  const v =
+    typeof props.value === "number" ? props.value : Number(props.value ?? 0);
+  const isNeg = v < 0;
+  const x = (props.x ?? 0) + (isNeg ? -8 : (props.width ?? 0) + 8);
+  const y = (props.y ?? 0) + (props.height ?? 0) / 2;
+
   return (
     <text
-      x={x - 8}
-      y={cy}
-      textAnchor="end"
-      dominantBaseline="middle"
+      x={x}
+      y={y}
+      textAnchor={isNeg ? "end" : "start"}
+      dominantBaseline="central"
       className="fill-foreground text-[11px]"
     >
-      {fmtUsd(Math.abs(row.neg))}
+      {fmtUsd(v)}
     </text>
   );
 }
 
-function rightGainLabel(props: LabelRenderProps) {
-  const { x = 0, y = 0, width = 0, height = 0, payload } = props;
-  const row = payload as Row | undefined;
-  if (!row || row.pos === 0) return null;
-  const cx = x + width + 8;
-  const cy = y + height / 2;
-  return (
-    <text
-      x={cx}
-      y={cy}
-      textAnchor="start"
-      dominantBaseline="middle"
-      className="fill-foreground text-[11px]"
-    >
-      {fmtUsd(row.pos)}
-    </text>
+export default function PnLPerSymbolCard({
+  merged,
+}: {
+  merged: MetricsPayload;
+}) {
+  const rows = React.useMemo(() => build(merged), [merged]);
+  const data = React.useMemo(() => toDiverging(rows), [rows]);
+  const domain = React.useMemo(() => maxAbsDomain(data), [data]);
+
+  // Size: height scales with number of rows so all labels fit cleanly
+  const count = Math.max(1, data.length);
+  const height = Math.min(520, Math.max(220, count * 28 + 80));
+  const innerAvail = Math.max(120, height - 96);
+  const barSize = Math.max(
+    14,
+    Math.min(32, Math.floor(innerAvail / count) - 6)
   );
-}
-
-export default function PnLPerSymbolCard({ merged }: { merged: MetricsPayload }) {
-  const data = React.useMemo(() => build(merged), [merged]);
-
-  const [contentRef, { width }] = useMeasure<HTMLDivElement>();
-  const rows = data.length;
-  const top = 12;
-  const bottom = 8;
-  const left = 0;
-  const right = 16;
-
-  const baseBar =
-    rows <= 6 ? 28 : rows <= 10 ? 24 : rows <= 16 ? 20 : rows <= 24 ? 18 : 16;
-  const widthFactor =
-    width < 520 ? 0.9 : width < 800 ? 1.0 : width < 1100 ? 1.1 : 1.2;
-  const barSize = Math.max(12, Math.min(28, Math.round(baseBar * widthFactor)));
-  const gapY = Math.round(barSize * 0.45);
-  const height = rows ? rows * (barSize + gapY) + top + bottom + 2 : 240;
-
-  const maxSide = data.reduce(
-    (m, r) => Math.max(m, r.pos, Math.abs(r.neg)),
-    0
-  );
-  const xMax = (maxSide || 1) * 1.08;
 
   return (
     <Card className="py-0">
@@ -152,11 +119,11 @@ export default function PnLPerSymbolCard({ merged }: { merged: MetricsPayload })
         <div className="px-6 pt-4 pb-3 sm:py-3">
           <CardTitle className="leading-tight">Total PnL per Symbol</CardTitle>
           <CardDescription className="mt-0.5">
-            Left = losses • Right = gains
+            Zero-centered; losses left (red), profits right (green)
           </CardDescription>
         </div>
       </CardHeader>
-      <CardContent ref={contentRef} className="px-2 sm:p-6">
+      <CardContent className="px-2 sm:p-6">
         {!data.length ? (
           <div className="text-sm text-muted-foreground">No data.</div>
         ) : (
@@ -170,60 +137,56 @@ export default function PnLPerSymbolCard({ merged }: { merged: MetricsPayload })
               data={data}
               layout="vertical"
               barSize={barSize}
-              barCategoryGap={gapY}
-              margin={{ top, bottom, left, right }}
+              margin={{ left: 8, right: 56, top: 8, bottom: 8 }}
             >
-              {/* background halves like the screenshot */}
-              <ReferenceArea x1={-xMax} x2={0} fill="var(--chart-1)" fillOpacity={0.08} />
-              <ReferenceArea x1={0} x2={xMax} fill="var(--chart-2)" fillOpacity={0.08} />
-
               <CartesianGrid horizontal={false} />
               <YAxis
                 dataKey="label"
                 type="category"
-                width={Math.min(220, Math.max(120, Math.floor(width * 0.28)))}
                 tickLine={false}
                 axisLine={false}
-                tickMargin={4}
+                tickMargin={8}
+                width={180}
               />
               <XAxis
                 type="number"
-                domain={[-xMax, xMax]}
+                domain={domain}
+                tickLine={false}
+                axisLine={false}
+                tickMargin={6}
                 tickFormatter={(v: number) => fmtUsd(v)}
               />
-
-              {/* center zero line */}
-              <ReferenceLine x={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="6 6" />
-
+              <ReferenceLine x={0} stroke="hsl(var(--muted-foreground))" />
               <ChartTooltip
-                cursor={false}
+                cursor={{ strokeOpacity: 0.08 }}
                 content={
                   <ChartTooltipContent
                     indicator="dashed"
-                    formatter={(_, __, p) => {
-                      const row = (p?.payload ?? {}) as Row;
-                      return [
-                        `${fmtUsd(row.pos)} / -${fmtUsd(Math.abs(row.neg))}`,
-                        "Gains / Losses",
-                      ];
+                    formatter={(val) => {
+                      const n =
+                        typeof val === "number" ? val : Number(val ?? 0);
+                      return [fmtUsd(n), n >= 0 ? "Profit" : "Loss"];
                     }}
                     labelFormatter={(label: string) => label}
                   />
                 }
               />
-
-              <Bar dataKey="neg" stackId="pnl" radius={[0, 4, 4, 0]}>
-                {data.map((r) => (
-                  <Cell key={`neg-${r.label}`} fill={RED} />
-                ))}
-                <LabelList dataKey="neg" content={leftLossLabel} />
+              {/* Negatives first so they stack left of zero */}
+              <Bar
+                dataKey="neg"
+                stackId="pnl"
+                fill="var(--color-neg)"
+                radius={[4, 0, 0, 4]}
+              >
+                <LabelList dataKey="neg" content={DivergingValueLabel} />
               </Bar>
-
-              <Bar dataKey="pos" stackId="pnl" radius={[4, 0, 0, 4]}>
-                {data.map((r) => (
-                  <Cell key={`pos-${r.label}`} fill={GREEN} />
-                ))}
-                <LabelList dataKey="pos" content={rightGainLabel} />
+              <Bar
+                dataKey="pos"
+                stackId="pnl"
+                fill="var(--color-pos)"
+                radius={[0, 4, 4, 0]}
+              >
+                <LabelList dataKey="pos" content={DivergingValueLabel} />
               </Bar>
             </BarChart>
           </ChartContainer>
