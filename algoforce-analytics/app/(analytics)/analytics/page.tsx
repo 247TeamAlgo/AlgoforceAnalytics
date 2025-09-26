@@ -58,30 +58,10 @@ export default function AnalyticsPage() {
           onAutoFetch={onAutoFetch}
         />
 
-        <Card className="p-3 text-sm flex flex-wrap items-center gap-x-6 gap-y-2">
-          <div>
-            <span className="text-muted-foreground">Selected:</span>{" "}
-            <strong>{selected.length}</strong> / {accounts.length}
-          </div>
-          <div>
-            <span className="text-muted-foreground">Range:</span>{" "}
-            <strong>
-              {(earliest && !range.start ? "Earliest" : range.start) ?? "—"} →{" "}
-              {range.end ?? "—"}
-            </strong>
-          </div>
-          <div className="ml-auto flex items-center gap-2">
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            <span className="text-muted-foreground">
-              {loading ? "Fetching metrics…" : "Ready"}
-            </span>
-          </div>
-        </Card>
-
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          {merged ? <MonthlyDrawdownCard merged={merged} /> : null}
-          {merged ? <ReturnsCard merged={merged} /> : null}
+          <MonthlyDrawdownCard perAccounts={perAccounts} />
           <ConsecutiveLosingDaysCard perAccounts={perAccounts} />
+          {merged ? <ReturnsCard merged={merged} /> : null}
           {merged ? <PnLPerSymbolCard merged={merged} /> : null}
           {merged ? <PnLPerPairCard merged={merged} /> : null}
         </div>
