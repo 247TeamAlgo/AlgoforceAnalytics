@@ -1,150 +1,50 @@
-// src/app/.../AnalyticsPage.tsx
 "use client";
-import HistoricalPairsTab from "./PnlWinrate/HistoricalPairsTab";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useEffect, useMemo, useState } from "react";
-import ConcentrationLeverageTab from "./ConcentrationLeverage/ConcentrationLeverageTab";
-import Controls from "./Controls";
-import LiquidityRiskTab from "./LiquidityRiskTab";
-import MarketRiskTab from "./MarketRisk/MarketRiskTab";
-import OpsForecastTab from "./OpsCrypto/OpsCryptoTab";
-import SimForecastTab from "./SimForecast/SimForecastTab";
-import OverviewTab from "./BasicMetrics/OverviewTab";
-import PerformanceTab from "./PerformanceTab";
-import RawJsonPanel from "./RawJsonPanel";
-import StrategyRiskTab from "./StrategyRiskTab";
-import type { Account, MetricsPayload, MultiMetricsResponse } from "./types";
-import { isMultiSelectionResponse } from "./types";
 
-/* ----------------------------- typed fetchers ----------------------------- */
-async function fetchAccounts(): Promise<Account[]> {
-  const res = await fetch("/api/accounts", { cache: "no-store" });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = (await res.json()) as Account[];
-  return Array.isArray(data) ? data.filter((a) => !!a?.redisName) : [];
-}
+import { useEffect } from "react";
+import { AlertTriangle, Loader2 } from "lucide-react";
+import { Card } from "@/components/ui/card";
 
-// NOTE: We DO NOT send earliest=true by default anymore.
-// If earliest is true, we only include it when no explicit startDate exists.
-async function fetchMetricsForSelected(
-  accounts: string[],
-  range: { start?: string; end?: string },
-  earliest: boolean
-): Promise<MultiMetricsResponse> {
-  const params = new URLSearchParams();
-  if (accounts.length > 0) params.set("accounts", accounts.join(","));
-  const hasExplicitRange = Boolean(range.start && range.end);
-
-  if (hasExplicitRange) {
-    params.set("startDate", range.start as string);
-    params.set("endDate", range.end as string);
-  } else if (earliest && range.end) {
-    params.set("earliest", "true");
-    params.set("endDate", range.end);
-  } else {
-    // nothing valid; caller should guard against this.
-  }
-
-  const res = await fetch(`/api/metrics?${params.toString()}`, {
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-  return (await res.json()) as MultiMetricsResponse;
-}
+import { useAnalyticsData } from "./hooks/useAnalyticsData";
+import Controls from "./components/Controls";
+import MonthlyDrawdownCard from "./components/performance-metrics/CombinedDrawdownCard";
+import ConsecutiveLosingDaysCard from "./components/performance-metrics/ConsecutiveLosingDaysCard";
+import PnLPerSymbolCard from "./components/performance-metrics/PnLPerSymbolCard";
+import ReturnsCard from "./components/performance-metrics/ReturnsCard";
+import PnLPerPairCard from "./components/performance-metrics/PnLPerPairCard";
 
 export default function AnalyticsPage() {
-  // Date range state (no tz)
-  const [range, setRange] = useState<{ start?: string; end?: string }>({});
-  const [earliest, setEarliest] = useState<boolean>(false); // default OFF
+  const {
+    accounts,
+    selected,
+    setSelected,
+    range,
+    setRange,
+    earliest,
+    setEarliest,
+    loading,
+    error,
+    merged,
+    perAccounts,
+    onAutoFetch,
+  } = useAnalyticsData();
 
-  // Accounts selection
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
-
-  // Data
-  const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
-  const [rawJson, setRawJson] = useState<MultiMetricsResponse | null>(null);
-
-  /* ----------------------- bootstrap on mount ----------------------- */
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const all = await fetchAccounts();
-        if (!alive) return;
-        setAccounts(all);
-
-        const monitored = all
-          .filter((a) => a.monitored)
-          .map((a) => a.redisName);
-        setSelected(monitored);
-
-        // Default to last 30 days and ensure earliest=false on startup
-        const end = new Date();
-        const start = new Date();
-        start.setDate(end.getDate() - 30);
-        setRange({
-          start: start.toISOString().slice(0, 10),
-          end: end.toISOString().slice(0, 10),
-        });
-        setEarliest(false);
-        // No metrics fetch here; Controls/onAutoFetch will trigger once state is valid.
-      } catch (e: unknown) {
-        if (!alive) return;
-        setError(e instanceof Error ? e.message : "Failed to initialize");
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  /* ----------------------- auto-fetch handler ----------------------- */
-  const onAutoFetch = async (): Promise<void> => {
-    // Only fetch when we have accounts AND a valid explicit [start,end]
-    // or (no start && earliest && end)
-    if (!selected.length) return;
-
-    const hasExplicitRange = Boolean(range.start && range.end);
-    if (!hasExplicitRange && !(earliest && range.end)) return;
-
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await fetchMetricsForSelected(selected, range, earliest);
-      setRawJson(data);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Fetch failed");
-    } finally {
-      setLoading(false);
+    const hasExplicit = Boolean(range.start && range.end);
+    if (selected.length && (hasExplicit || (earliest && range.end))) {
+      void onAutoFetch();
     }
-  };
-
-  /* --------------------- derived data for tabs ---------------------- */
-  const merged = useMemo<MetricsPayload | null>(() => {
-    if (!rawJson) return null;
-    return isMultiSelectionResponse(rawJson) ? rawJson.merged : rawJson;
-  }, [rawJson]);
-
-  const perAccounts = useMemo<
-    Record<string, MetricsPayload> | undefined
-  >(() => {
-    if (!rawJson) return undefined;
-    return isMultiSelectionResponse(rawJson) ? rawJson.per_account : undefined;
-  }, [rawJson]);
-
-  const dailyStrip = useMemo(() => {
-    if (!merged) return [] as Array<{ day: string; v: number }>;
-    return merged.daily_return_dollars.map((d) => ({
-      day: d.day,
-      v: d.daily_profit_loss_usd,
-    }));
-  }, [merged]);
+  }, [selected.length, range.start, range.end, earliest, onAutoFetch]);
 
   return (
     <div className="min-h-full w-full bg-background p-5">
       <section className="p-5 space-y-5 max-w-[1600px] mx-auto">
+        {error ? (
+          <Card className="border-destructive/40 bg-destructive/5 text-destructive p-3 text-sm flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            <span>{error}</span>
+          </Card>
+        ) : null}
+
         <Controls
           accounts={accounts}
           selected={selected}
@@ -152,82 +52,49 @@ export default function AnalyticsPage() {
           range={range}
           setRange={setRange}
           earliest={earliest}
-          setEarliest={setEarliest} // FIXED: previously passed a boolean
+          setEarliest={setEarliest}
           loading={loading}
           error={error}
           onAutoFetch={onAutoFetch}
         />
 
-        <Tabs defaultValue="basics" className="space-y-5">
-          {/* SCROLL WRAPPER start */}
-          <div className="-mx-3 px-3">
-            <div className="overflow-x-auto overscroll-x-contain [scrollbar-gutter:stable]">
-              <TabsList className="flex min-w-max whitespace-nowrap gap-2 glass-card p-1 h-12">
-                <TabsTrigger value="basics">Basic Metrics</TabsTrigger>
-                <TabsTrigger value="pnl-win">PNL and Winrate</TabsTrigger>
-                <TabsTrigger value="return-dd">
-                  Returns and Drawdown
-                </TabsTrigger>
-
-                <TabsTrigger value="performance">
-                  Performance &amp; Distribution
-                </TabsTrigger>
-                <TabsTrigger value="market-risk">Market Risk</TabsTrigger>
-                <TabsTrigger value="strategy-risk">Strategy Risk</TabsTrigger>
-                <TabsTrigger value="liquidity-risk">Liquidity Risk</TabsTrigger>
-                <TabsTrigger value="concentration-leverage">
-                  Concentration &amp; Leverage
-                </TabsTrigger>
-                <TabsTrigger value="ops-crypto">
-                  Ops &amp; Crypto-Specific
-                </TabsTrigger>
-                <TabsTrigger value="simulation-forecast">
-                  Simulation &amp; Forecast
-                </TabsTrigger>
-              </TabsList>
-            </div>
+        <Card className="p-3 text-sm flex flex-wrap items-center gap-x-6 gap-y-2">
+          <div>
+            <span className="text-muted-foreground">Selected:</span>{" "}
+            <strong>{selected.length}</strong> / {accounts.length}
           </div>
+          <div>
+            <span className="text-muted-foreground">Range:</span>{" "}
+            <strong>
+              {(earliest && !range.start ? "Earliest" : range.start) ?? "—"} →{" "}
+              {range.end ?? "—"}
+            </strong>
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            <span className="text-muted-foreground">
+              {loading ? "Fetching metrics…" : "Ready"}
+            </span>
+          </div>
+        </Card>
 
-          <TabsContent value="basics">
-            <OverviewTab
-              merged={merged}
-              perAccounts={perAccounts}
-              accounts={accounts}
-              dailyStrip={dailyStrip}
-              selectedCount={selected.length}
-            />
-          </TabsContent>
-          <TabsContent value="pnl-win">
-            <HistoricalPairsTab
-              accounts={accounts}
-              defaultAccount={selected[1]}
-            />
-          </TabsContent>
-          <TabsContent value="performance">
-            <PerformanceTab merged={merged} perAccounts={perAccounts} />
-          </TabsContent>
-          <TabsContent value="market-risk">
-            <MarketRiskTab merged={merged} />
-          </TabsContent>
-          <TabsContent value="strategy-risk">
-            <StrategyRiskTab />
-          </TabsContent>
-          <TabsContent value="liquidity-risk">
-            <LiquidityRiskTab />
-          </TabsContent>
-          <TabsContent value="concentration-leverage">
-            <ConcentrationLeverageTab merged={merged} />
-          </TabsContent>
-          <TabsContent value="ops-crypto">
-            <OpsForecastTab />
-          </TabsContent>
-          <TabsContent value="simulation-forecast">
-            <SimForecastTab merged={merged} />
-          </TabsContent>
-        </Tabs>
-
-        <RawJsonPanel title="Raw JSON" json={rawJson} />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          {merged ? <MonthlyDrawdownCard merged={merged} /> : null}
+          {merged ? <ReturnsCard merged={merged} /> : null}
+          <ConsecutiveLosingDaysCard perAccounts={perAccounts} />
+          {merged ? <PnLPerSymbolCard merged={merged} /> : null}
+          {merged ? <PnLPerPairCard merged={merged} /> : null}
+        </div>
       </section>
+
+      {loading ? (
+        <div className="pointer-events-none fixed inset-0 grid place-items-center bg-background/40 backdrop-blur-sm">
+          <div className="glass-card px-4 py-3 rounded-xl shadow-lg border flex items-center gap-3">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            <span className="text-sm">Loading charts…</span>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
