@@ -336,7 +336,6 @@ export default function ConsecutiveLosingDaysThresholdsCard({
             <CardTitle>Consecutive Losing Days — Thresholds</CardTitle>
             <CardDescription>
               Bars = current losing streak • vertical dashed lines = thresholds
-              (with legend).
             </CardDescription>
           </div>
           <div className="flex items-center gap-2 shrink-0">

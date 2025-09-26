@@ -1,3 +1,4 @@
+// algoforce-analytics\app\api\metrics_v1\1-performance_metrics\calculators\consecutive_losing_days.ts
 import { DailyRow, Streaks } from "../metrics/types";
 
 export function consecutiveLosingDays(daily: DailyRow[], threshold = 4): Streaks {

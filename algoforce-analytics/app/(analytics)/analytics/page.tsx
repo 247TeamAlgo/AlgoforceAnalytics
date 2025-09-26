@@ -61,9 +61,9 @@ export default function AnalyticsPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           <MonthlyDrawdownCard perAccounts={perAccounts} />
           <ConsecutiveLosingDaysCard perAccounts={perAccounts} />
-          {merged ? <ReturnsCard merged={merged} /> : null}
           {merged ? <PnLPerSymbolCard merged={merged} /> : null}
           {merged ? <PnLPerPairCard merged={merged} /> : null}
+          {merged ? <ReturnsCard merged={merged} /> : null}
         </div>
       </section>
 

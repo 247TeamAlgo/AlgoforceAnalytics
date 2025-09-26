@@ -1,3 +1,5 @@
+// algoforce-analytics\app\api\metrics_v1\1-performance_metrics\calculators\z_sql_fetch_modify.ts
+
 import { getSQLTradesPool } from "../../../../../lib/db/sql";
 import type { Pool, RowDataPacket } from "mysql2/promise";
 import { getTableName } from "./accounts_json";

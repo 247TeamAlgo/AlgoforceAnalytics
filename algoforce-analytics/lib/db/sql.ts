@@ -1,9 +1,10 @@
-// lib/sql_trades.ts
+// algoforce-analytics\lib\db\sql.ts
 import { createPool, type Pool } from "mysql2/promise";
 
 /**
  * Singleton MySQL pool for the `trades` database.
  * NOTE: This module must only be imported from server code (API routes, server components).
+ * algoforce-analytics\lib\db\sql.ts
  */
 let pool: Pool | null = null;
 

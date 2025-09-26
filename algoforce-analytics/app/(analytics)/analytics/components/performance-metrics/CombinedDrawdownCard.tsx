@@ -342,7 +342,7 @@ export default function CombinedDrawdownCard({
             <CardTitle>Drawdown Thresholds — Per Account</CardTitle>
             <CardDescription>
               Bars = min drawdown (magnitude) • vertical dashed lines =
-              thresholds (with legend).
+              thresholds
             </CardDescription>
           </div>
           <div className="flex items-center gap-2 shrink-0">

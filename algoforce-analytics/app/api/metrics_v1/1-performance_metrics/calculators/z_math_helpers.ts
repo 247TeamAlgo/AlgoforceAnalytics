@@ -1,3 +1,4 @@
+// algoforce-analytics\app\api\metrics_v1\1-performance_metrics\calculators\z_math_helpers.ts
 import { readBaselineUsd } from "@/lib/baseline";
 import { DailyReturnDollars, DailyRow, DrawdownBlock, DrawdownPeriod, EquityPoint, MetricConfig, MetricsPayload, RolledRow, Streaks } from "../metrics/types";
 import { earliestLocalDateForAccount, fetchDailyRows, fetchMTD, fetchTradeCount, findEarliestLocalDateForAccounts, findLatestLocalDateForAccounts, latestLocalDateForAccount } from "./z_sql_fetch_modify";
