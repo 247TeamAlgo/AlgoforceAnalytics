@@ -1,4 +1,4 @@
-// lib/sql_trades.ts
+// lib/db/sql.ts
 import { createPool, type Pool } from "mysql2/promise";
 
 /**

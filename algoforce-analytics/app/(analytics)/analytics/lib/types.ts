@@ -1,4 +1,5 @@
 // Strict client-side types (no `any`)
+// app/(analytics)/analytics/lib/types.ts
 
 export type ISODate = string; // "YYYY-MM-DD"
 
@@ -120,11 +121,6 @@ export type MetricsPayload = {
   mtd_return_dollars: number;
   mtd_total_fees_dollars: number;
   initial_balance: number;
-
-  symbolExposures?: SymbolExposure[];
-  pairExposures?: PairExposure[];
-  concentration?: ConcentrationRisk;
-  corrMatrix?: CorrelationMatrix;
 };
 
 export type MetricsMultiMeta = {

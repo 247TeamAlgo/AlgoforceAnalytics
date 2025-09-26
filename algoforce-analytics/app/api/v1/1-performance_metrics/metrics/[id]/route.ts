@@ -1,6 +1,6 @@
 // app/api/metrics/[id]/route.ts
 import { NextResponse } from "next/server";
-import { computeAccountMetrics } from "../metrics";
+import { computeAccountMetrics } from "../../calculators/z_math_helpers";
 import type { MetricConfig } from "../types";
 
 export const runtime = "nodejs";

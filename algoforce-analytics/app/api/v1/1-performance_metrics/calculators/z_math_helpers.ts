@@ -1,8 +1,10 @@
+// app/api/v1/1-performance_metrics/calculators/z_math_helpers.ts
 import { readBaselineUsd } from "@/lib/baseline";
 import { DailyReturnDollars, DailyRow, DrawdownBlock, DrawdownPeriod, EquityPoint, MetricConfig, MetricsPayload, RolledRow, Streaks } from "../metrics/types";
-import { earliestLocalDateForAccount, fetchDailyRows, fetchMTD, fetchTradeCount, findEarliestLocalDateForAccounts, findLatestLocalDateForAccounts, latestLocalDateForAccount } from "./z_sql_fetch_modify";
+import { earliestLocalDateForAccount, fetchDailyRows, fetchMTD, fetchTradeCount, findEarliestLocalDateForAccounts, findLatestLocalDateForAccounts, latestLocalDateForAccount, fetchWinRates } from "./z_sql_fetch_modify";
 import { addDaysISODate, diffDaysInclusive, fmtISO, localTodayISO, resolveAsOf, startOfMonthISO } from "./z_time_tz";
 import { consecutiveLosingDays } from "./consecutive_losing_days";
+import { readAccounts } from "@/lib/jsonStore";
 
 function rollBalances(daily: DailyRow[], initial: number): RolledRow[] {
   let cur = initial;
@@ -177,6 +179,13 @@ export async function computeAccountMetrics(
   const { block: ddAll, period: ddPeriod } = drawdownStats(eqAll);
   const { block: ddMtd } = drawdownStats(equitySeries(mtdRolled));
 
+  // Win rates
+  const wrAll = await fetchWinRates(accountKey);
+  const start30ISO = addDaysISODate(endISO!, -29);
+  const last30 = await fetchDailyRows(accountKey, tz, start30ISO, endExclusive);
+  const posDays = last30.filter((d) => d.net_pnl > 0).length;
+  const wr30 = last30.length ? (100 * posDays) / last30.length : null;
+
   const tradesCount = await fetchTradeCount(accountKey);
   const streaks = consecutiveLosingDays(
     mtdDaily.length ? mtdDaily : dailyWindow,
@@ -224,6 +233,10 @@ export async function computeAccountMetrics(
     },
     drawdowns: ddAll,
     drawdown_period: ddPeriod,
+    win_rates: {
+      rolling_30d_win_rate_pct: wr30 == null ? null : Number(wr30.toFixed(8)),
+      win_rate_from_run_start_pct: wrAll.win_rate_from_run_start_pct,
+    },
     counts: { number_of_trades_total: tradesCount },
     streaks,
     daily_return_dollars,
@@ -231,6 +244,15 @@ export async function computeAccountMetrics(
     mtd_total_fees_dollars: Number(mtd_fees.toFixed(8)),
     initial_balance,
   };
+}
+
+export async function computeOverallMetrics(
+  cfg: MetricConfig
+): Promise<MetricsPayload> {
+  const accounts = (await readAccounts())
+    .filter((a) => a.monitored)
+    .map((a) => a.redisName);
+  return computeMergedMetricsForAccounts(accounts, cfg);
 }
 
 export async function computeMergedMetricsForAccounts(
@@ -312,6 +334,24 @@ export async function computeMergedMetricsForAccounts(
     (s, a) => s + a.counts.number_of_trades_total,
     0
   );
+  const wrAllWeighted = totalTrades
+    ? per.reduce(
+        (s, a) =>
+          s +
+          (a.win_rates.win_rate_from_run_start_pct ?? 0) *
+            a.counts.number_of_trades_total,
+        0
+      ) / totalTrades
+    : null;
+  const wr30Weighted = totalTrades
+    ? per.reduce(
+        (s, a) =>
+          s +
+          (a.win_rates.rolling_30d_win_rate_pct ?? 0) *
+            a.counts.number_of_trades_total,
+        0
+      ) / totalTrades
+    : null;
 
   let total_return_pct_over_window: number | null = null;
   if (rolled.length) {
@@ -353,6 +393,12 @@ export async function computeMergedMetricsForAccounts(
     },
     drawdowns: ddAll,
     drawdown_period: ddPeriod,
+    win_rates: {
+      rolling_30d_win_rate_pct:
+        wr30Weighted == null ? null : Number(wr30Weighted.toFixed(8)),
+      win_rate_from_run_start_pct:
+        wrAllWeighted == null ? null : Number(wrAllWeighted.toFixed(8)),
+    },
     counts: { number_of_trades_total: totalTrades },
     streaks: consecutiveLosingDays(daily, 4),
     daily_return_dollars,

@@ -1,5 +1,5 @@
 "use client";
-
+// app/(analytics)/analytics/hooks/useAnalyticsData.tsx
 import { Account } from "@/lib/jsonStore";
 import { MetricsPayload } from "@/lib/types";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -33,6 +33,32 @@ async function fetchAccounts(): Promise<Account[]> {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = (await res.json()) as Account[];
   return Array.isArray(data) ? data.filter((a) => !!a?.redisName) : [];
+}
+
+async function fetchMetricsForSelected(
+  accounts: string[],
+  range: { start?: string; end?: string },
+  earliest: boolean
+): Promise<MultiMetricsResponse> {
+  const params = new URLSearchParams();
+  if (accounts.length > 0) params.set("accounts", accounts.join(","));
+  const hasExplicitRange = Boolean(range.start && range.end);
+
+  if (hasExplicitRange) {
+    params.set("startDate", range.start as string);
+    params.set("endDate", range.end as string);
+  } else if (earliest && range.end) {
+    params.set("earliest", "true");
+    params.set("endDate", range.end);
+  } else {
+    // nothing valid; caller should guard against this.
+  }
+
+  const res = await fetch(`/api/v1/1-performance_metrics/metrics?${params.toString()}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return (await res.json()) as MultiMetricsResponse;
 }
 
 /* ----------------------------- headless logic ----------------------------- */
@@ -88,7 +114,8 @@ export function useAnalyticsData(): AnalyticsData {
     setLoading(true);
     setError(null);
     try {
-      const data = generateDummyMetrics(selected, range, earliest);
+      // const data = generateDummyMetrics(selected, range, earliest);
+      const data = await fetchMetricsForSelected(selected, range, earliest);
       setRawJson(data);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to build metrics");

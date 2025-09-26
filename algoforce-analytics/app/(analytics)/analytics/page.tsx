@@ -1,4 +1,5 @@
 "use client";
+//app/(analytics)/page.tsx
 
 import { useEffect } from "react";
 import { AlertTriangle, Loader2 } from "lucide-react";

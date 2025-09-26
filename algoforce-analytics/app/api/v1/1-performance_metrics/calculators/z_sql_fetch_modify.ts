@@ -1,3 +1,4 @@
+// app/api/v1/1-performance_metrics/calculators/z_sql_fetch_modify.ts
 import { getSQLTradesPool } from "../../../../../lib/db/sql";
 import type { Pool, RowDataPacket } from "mysql2/promise";
 import { getTableName } from "./accounts_json";
@@ -142,4 +143,23 @@ export async function fetchDailyRows(
     fees: Number(r.fees ?? 0),
     net_pnl: Number(r.net_pnl ?? 0),
   }));
+}
+
+export async function fetchWinRates(
+  accountKey: string
+): Promise<{
+  rolling_30d_win_rate_pct: number | null;
+  win_rate_from_run_start_pct: number | null;
+}> {
+  const table = await getTableName(accountKey);
+  const pool: Pool = getSQLTradesPool();
+  const [rowsAll] = await pool.query<RowDataPacket[]>(
+    `SELECT 100.0 * SUM( (realizedPnl - commission) > 0 ) / COUNT(*) AS win_rate_all FROM \`${table}\``
+  );
+  const wrAll = rowsAll?.[0]?.win_rate_all as number | null | undefined;
+
+  return {
+    rolling_30d_win_rate_pct: null, // filled by caller when needed
+    win_rate_from_run_start_pct: wrAll != null ? Number(wrAll) : null,
+  };
 }
