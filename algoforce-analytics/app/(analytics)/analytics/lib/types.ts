@@ -108,6 +108,7 @@ export type MetricsPayload = {
   };
   drawdowns: DrawdownBlock;
   drawdown_period: DrawdownPeriod;
+  
   win_rates: {
     rolling_30d_win_rate_pct: number | null;
     win_rate_from_run_start_pct: number | null;

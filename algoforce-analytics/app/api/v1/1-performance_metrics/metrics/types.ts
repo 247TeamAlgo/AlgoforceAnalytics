@@ -122,6 +122,10 @@ export type MetricsPayload = {
         mtd_total_fees_usd: number;
         mtd_drawdown_pct: number | null;
     };
+    win_rates: {
+        rolling_30d_win_rate_pct: number | null;
+        win_rate_from_run_start_pct: number | null;
+    };
     drawdowns: DrawdownBlock;
     drawdown_period: DrawdownPeriod;
     counts: { number_of_trades_total: number };
