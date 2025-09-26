@@ -1,8 +1,8 @@
 // app/api/metrics/route.ts
 import { NextResponse } from "next/server";
 import { readAccounts } from "@/lib/jsonStore";
-import { computeSelectedMetrics } from "@/lib/metrics";
-import type { MetricConfig } from "@/lib/types";
+import { computeSelectedMetrics } from "./metrics";
+import type { MetricConfig } from "./types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
