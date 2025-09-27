@@ -1,4 +1,5 @@
 "use client";
+//app/(analytics)/page.tsx
 
 import { useEffect } from "react";
 import { AlertTriangle, Loader2 } from "lucide-react";
@@ -6,7 +7,7 @@ import { Card } from "@/components/ui/card";
 
 import { useAnalyticsData } from "./hooks/useAnalyticsData";
 import Controls from "./components/Controls";
-import CombinedDrawdownCard from "./components/performance-metrics/CombinedDrawdownCard";
+import MonthlyDrawdownCard from "./components/performance-metrics/CombinedDrawdownCard";
 import ConsecutiveLosingDaysCard from "./components/performance-metrics/ConsecutiveLosingDaysCard";
 import PnLPerSymbolCard from "./components/performance-metrics/PnLPerSymbolCard";
 import ReturnsCard from "./components/performance-metrics/ReturnsCard";
@@ -59,13 +60,7 @@ export default function AnalyticsPage() {
         />
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          {/* NEW: fetch server rows in the card */}
-          <CombinedDrawdownCard
-            selected={selected}
-            range={range}
-            earliest={earliest}
-          />
-
+          <MonthlyDrawdownCard perAccounts={perAccounts} />
           <ConsecutiveLosingDaysCard perAccounts={perAccounts} />
           {merged ? <PnLPerSymbolCard merged={merged} /> : null}
           {merged ? <PnLPerPairCard merged={merged} /> : null}

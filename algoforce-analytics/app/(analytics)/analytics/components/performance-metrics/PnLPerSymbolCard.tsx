@@ -23,6 +23,12 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { MetricsPayload, HistoricalBucket } from "../../lib/types";
 import { fmtUsd } from "../../lib/types";
 
@@ -37,9 +43,12 @@ type LabelRenderProps = {
   value?: number | string;
 };
 
+const POS_HEX = "#23ba7d";
+const NEG_HEX = "#f6465d";
+
 const chartConfig: ChartConfig = {
-  pos: { label: "Profit", color: "var(--chart-2)" }, // green
-  neg: { label: "Loss", color: "var(--chart-1)" }, // red
+  pos: { label: "Profit", color: POS_HEX }, // green
+  neg: { label: "Loss", color: NEG_HEX },   // red
 };
 
 function build(merged: MetricsPayload, topN = 12): Row[] {
@@ -73,7 +82,27 @@ function maxAbsDomain(rows: DivergingRow[]): [number, number] {
   return [-m, m];
 }
 
-/** Value labels outside the bar ends; left for negatives, right for positives */
+/** Resize observer hook (mirrors CombinedDrawdownCard). */
+function useMeasure<T extends HTMLElement>(): [
+  React.MutableRefObject<T | null>,
+  { width: number; height: number },
+] {
+  const ref = React.useRef<T>(null);
+  const [size, setSize] = React.useState({ width: 0, height: 0 });
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const cr = entries[0]?.contentRect;
+      if (cr) setSize({ width: cr.width, height: cr.height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, size];
+}
+
+/** Value labels outside bar ends; left for negatives, right for positives. */
 function DivergingValueLabel(raw: unknown) {
   const props = raw as LabelRenderProps;
   const v =
@@ -95,49 +124,123 @@ function DivergingValueLabel(raw: unknown) {
   );
 }
 
-export default function PnLPerSymbolCard({
-  merged,
-}: {
-  merged: MetricsPayload;
-}) {
+export default function PnLPerSymbolCard({ merged }: { merged: MetricsPayload }) {
   const rows = React.useMemo(() => build(merged), [merged]);
   const data = React.useMemo(() => toDiverging(rows), [rows]);
   const domain = React.useMemo(() => maxAbsDomain(data), [data]);
 
-  // Size: height scales with number of rows so all labels fit cleanly
-  const count = Math.max(1, data.length);
-  const height = Math.min(520, Math.max(220, count * 28 + 80));
-  const innerAvail = Math.max(120, height - 96);
-  const barSize = Math.max(
-    14,
-    Math.min(32, Math.floor(innerAvail / count) - 6)
+  const [contentRef, { width }] = useMeasure<HTMLDivElement>();
+  const rowCount = Math.max(1, data.length);
+
+  // Sizing strategy copied from CombinedDrawdownCard
+  const widthFactor =
+    width < 520 ? 0.96 : width < 800 ? 1.06 : width < 1100 ? 1.18 : 1.3;
+
+  const baseBar =
+    rowCount <= 6
+      ? 32
+      : rowCount <= 10
+        ? 28
+        : rowCount <= 16
+          ? 24
+          : rowCount <= 24
+            ? 20
+            : rowCount <= 32
+              ? 18
+              : 16;
+
+  const barSize = Math.max(12, Math.min(40, Math.round(baseBar * widthFactor)));
+  const gapY = Math.round(barSize * 0.38);
+
+  const longest = rows.reduce((m, r) => Math.max(m, r.label.length), 0);
+  const yAxisWidth = Math.max(
+    112,
+    Math.min(Math.floor(width * 0.34), longest * 7 + 20)
   );
+
+  const maxAbs = Math.max(Math.abs(domain[0]), Math.abs(domain[1]));
+  const rightLabelChars = fmtUsd(maxAbs).length;
+  const rightMargin = Math.max(12, 6 + rightLabelChars * 6);
+  const topMargin = 12;
+  const leftMargin = 0;
+  const bottomMargin = 6;
+
+  const chartHeight =
+    rowCount * (barSize + gapY) + topMargin + bottomMargin + 4;
 
   return (
     <Card className="py-0">
+      {/* Header + toolbar (legend pills), same pattern as CombinedDrawdownCard */}
       <CardHeader className="border-b !p-0">
-        <div className="px-6 pt-4 pb-3 sm:py-3">
-          <CardTitle className="leading-tight">Total PnL per Symbol</CardTitle>
-          <CardDescription className="mt-0.5">
-            Zero-centered; losses left (red), profits right (green)
-          </CardDescription>
+        <div className="px-6 pt-4 pb-2 sm:py-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <CardTitle className="leading-tight">Total PnL per Symbol</CardTitle>
+              <CardDescription className="mt-0.5">
+                Zero-centered; losses left, profits right. Symmetric scale ±{fmtUsd(maxAbs)}.
+              </CardDescription>
+            </div>
+          </div>
+
+          {/* Toolbar legend pills */}
+          <TooltipProvider>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs cursor-default">
+                    <span
+                      aria-hidden
+                      className="h-2.5 w-2.5 rounded-[3px]"
+                      style={{ backgroundColor: POS_HEX }}
+                    />
+                    <span className="text-muted-foreground">Profit</span>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent className="text-xs">
+                  Positive net PnL extends to the right from zero.
+                </TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs cursor-default">
+                    <span
+                      aria-hidden
+                      className="h-2.5 w-2.5 rounded-[3px]"
+                      style={{ backgroundColor: NEG_HEX }}
+                    />
+                    <span className="text-muted-foreground">Loss</span>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent className="text-xs">
+                  Negative net PnL extends to the left from zero.
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          </TooltipProvider>
         </div>
       </CardHeader>
-      <CardContent className="px-2 sm:p-6">
+
+      <CardContent ref={contentRef} className="px-2 sm:p-6">
         {!data.length ? (
           <div className="text-sm text-muted-foreground">No data.</div>
         ) : (
           <ChartContainer
             config={chartConfig}
             className="w-full"
-            style={{ height }}
+            style={{ height: `${chartHeight}px` }}
           >
             <BarChart
               accessibilityLayer
               data={data}
               layout="vertical"
-              barSize={barSize}
-              margin={{ left: 8, right: 56, top: 8, bottom: 8 }}
+              barCategoryGap={gapY}
+              margin={{
+                left: leftMargin,
+                right: rightMargin,
+                top: topMargin,
+                bottom: bottomMargin,
+              }}
             >
               <CartesianGrid horizontal={false} />
               <YAxis
@@ -145,8 +248,8 @@ export default function PnLPerSymbolCard({
                 type="category"
                 tickLine={false}
                 axisLine={false}
-                tickMargin={8}
-                width={180}
+                tickMargin={4}
+                width={yAxisWidth}
               />
               <XAxis
                 type="number"
@@ -177,6 +280,7 @@ export default function PnLPerSymbolCard({
                 stackId="pnl"
                 fill="var(--color-neg)"
                 radius={[4, 0, 0, 4]}
+                barSize={barSize}
               >
                 <LabelList dataKey="neg" content={DivergingValueLabel} />
               </Bar>
@@ -185,6 +289,7 @@ export default function PnLPerSymbolCard({
                 stackId="pnl"
                 fill="var(--color-pos)"
                 radius={[0, 4, 4, 0]}
+                barSize={barSize}
               >
                 <LabelList dataKey="pos" content={DivergingValueLabel} />
               </Bar>

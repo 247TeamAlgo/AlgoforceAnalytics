@@ -1,2 +1,0 @@
-This is separated from the metrics.ts since most of the metrics here rely on whatsapp/redis tradesheet instead due to it having lesser win/loss.
-However, this borrows the max drawdown percent from the metrics for the prob of dd exceeding X%.
