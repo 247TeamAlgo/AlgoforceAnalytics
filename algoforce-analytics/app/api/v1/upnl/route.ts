@@ -1,85 +1,88 @@
 // app/api/v1/upnl/route.ts
-import { NextRequest, NextResponse } from "next/server";
-import { redis as getRedis } from "@/lib/db/redis";
-import { loadUpnlSum } from "../1-performance_metrics/calculators/redis_parsers";
-import { getAccountInfo } from "../1-performance_metrics/calculators/accounts_json";
+import { NextResponse } from "next/server";
+import { redis } from "@/lib/db/redis";
+import {
+  ACCOUNT_SET,
+  ACCOUNTS_INFO,
+} from "@/app/api/v1/1-performance_metrics/calculators/accounts_json";
+import { loadUpnlSum } from "@/app/api/v1/1-performance_metrics/calculators/redis_parsers";
 
-interface UpnlItem {
-  account: string; // redisName
-  upnl: number;
-}
-
-interface UpnlResponse {
-  selected: string[];
-  per_account: Record<string, UpnlItem>;
+type UpnlResponse = {
+  as_of: string; // ISO instant (UTC)
   combined_upnl: number;
-  meta: {
-    server_time_utc: string;
-  };
+  per_account_upnl: Record<string, number>;
+  base_snapshot_id?: string;
+  /** Accounts actually used by the server to compute this snapshot. */
+  accounts: string[];
+};
+
+function parseAccountsParam(sp: URLSearchParams): string[] {
+  const raw = sp.get("accounts");
+  if (!raw || raw.trim().length === 0) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 }
 
-export async function GET(req: NextRequest): Promise<NextResponse> {
+export async function GET(req: Request): Promise<Response> {
   try {
-    const rqp = req.nextUrl.searchParams;
-    const accountsParam = (rqp.get("accounts") || "").trim();
-    const accountIds = accountsParam
-      ? accountsParam
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean)
-      : [];
+    const url = new URL(req.url);
+    const sp = url.searchParams;
 
-    if (!accountIds.length) {
+    const requested = parseAccountsParam(sp);
+
+    // Defaults: monitored first; if none are flagged, fall back to all redisName
+    const monitoredDefaults = ACCOUNTS_INFO.filter((a) => !!a.monitored).map(
+      (a) => a.redisName
+    );
+    const allRedisNames = ACCOUNTS_INFO.map((a) => a.redisName);
+    const defaults =
+      monitoredDefaults.length > 0 ? monitoredDefaults : allRedisNames;
+
+    const accounts = requested.length > 0 ? requested : defaults;
+
+    // Validate against known redisName set
+    const unknown = accounts.filter((a) => !ACCOUNT_SET.has(a));
+    if (unknown.length > 0) {
       return NextResponse.json(
-        { error: "accounts is required (comma-separated redisName list)" },
+        { error: "Unknown accounts", details: { unknown } },
         { status: 400 }
       );
     }
 
-    // validate accounts (ignore unknown, but report)
-    const valid: string[] = [];
-    const ignored: string[] = [];
-    for (const k of accountIds) {
-      if (getAccountInfo(k)) valid.push(k);
-      else ignored.push(k);
-    }
-    if (!valid.length) {
-      return NextResponse.json(
-        { error: "No valid accounts in request", ignored },
-        { status: 400 }
-      );
-    }
+    const r = redis();
 
-    const r = getRedis();
-
-    const pairs = await Promise.all(
-      valid.map(async (k) => {
-        const v = await loadUpnlSum(r, k);
-        return [k, { account: k, upnl: Number(v.toFixed(2)) }] as const;
+    // Fetch live UPNL for each account's `${redisName}_live` key
+    const per_account_upnl: Record<string, number> = {};
+    await Promise.all(
+      accounts.map(async (acc) => {
+        const v = await loadUpnlSum(r, acc);
+        per_account_upnl[acc] = Number.isFinite(v) ? v : 0;
       })
     );
 
-    const per_account: Record<string, UpnlItem> = Object.fromEntries(pairs);
-    const combined_upnl = Number(
-      pairs.reduce((s, [, it]) => s + it.upnl, 0).toFixed(2)
+    const combined_upnl = accounts.reduce(
+      (s, a) => s + (per_account_upnl[a] ?? 0),
+      0
     );
 
-    const resp: UpnlResponse = {
-      selected: valid,
-      per_account,
+    const base_snapshot_id = sp.get("base_snapshot_id") || undefined; // optional echo
+
+    const body: UpnlResponse = {
+      as_of: new Date().toISOString(),
       combined_upnl,
-      meta: { server_time_utc: new Date().toISOString() },
+      per_account_upnl,
+      base_snapshot_id,
+      accounts, // echo back for visibility
     };
 
-    return NextResponse.json(resp, {
-      status: 200,
-      headers: {
-        "Cache-Control": "no-store", // realtime
-        "Content-Type": "application/json; charset=utf-8",
-      },
-    });
-  } catch (err: unknown) {
-    const msg = (err as Error)?.message ?? "Internal error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    const res = NextResponse.json(body, { status: 200 });
+    res.headers.set("Cache-Control", "no-store, must-revalidate"); // live endpoint
+    return res;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("[/api/v1/upnl] error:", err);
+    return NextResponse.json({ error: "UPNL fetch failed" }, { status: 500 });
   }
 }

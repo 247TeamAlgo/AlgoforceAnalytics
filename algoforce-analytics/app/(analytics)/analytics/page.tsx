@@ -12,6 +12,8 @@ import ConsecutiveLosingDaysCard from "./components/performance-metrics/Consecut
 import PnLPerSymbolCard from "./components/performance-metrics/PnLPerSymbolCard";
 import ReturnsCard from "./components/performance-metrics/ReturnsCard";
 import PnLPerPairCard from "./components/performance-metrics/PnLPerPairCard";
+import LiveUpnlStrip from "./components/LiveUpnlStrip";
+import { useUpnl } from "./hooks/useUpnl";
 
 export default function AnalyticsPage() {
   const {
@@ -29,26 +31,29 @@ export default function AnalyticsPage() {
     onAutoFetch,
   } = useAnalyticsData();
 
-  // 1) As soon as accounts load, ensure we have a non-empty selection.
+  // ensure a non-empty selection once accounts arrive
   useEffect(() => {
     if (selected.length === 0 && accounts.length > 0) {
       const monitored = accounts
         .filter((a) => Boolean(a.monitored))
         .map((a) => a.redisName);
-
-      // Prefer monitored; else fall back to all accounts.
-      setSelected(monitored.length > 0 ? monitored : accounts.map((a) => a.redisName));
+      setSelected(
+        monitored.length > 0 ? monitored : accounts.map((a) => a.redisName)
+      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accounts.length]);
 
-  // 2) Trigger heavy fetch when selection and date window are ready.
+  // heavy fetch trigger
   useEffect(() => {
     const hasExplicit = Boolean(range.start && range.end);
     if (selected.length > 0 && (hasExplicit || (earliest && range.end))) {
       void onAutoFetch();
     }
   }, [selected.length, range.start, range.end, earliest, onAutoFetch]);
+
+  // live UPNL (polls every 60s)
+  const { data: upnl } = useUpnl(selected, { pollMs: 1_000, jitterMs: 120 });
 
   return (
     <div className="min-h-full w-full bg-background p-5">
@@ -72,14 +77,34 @@ export default function AnalyticsPage() {
           error={error}
         />
 
+        {/* Live UPNL strip */}
+        <LiveUpnlStrip
+          accounts={accounts}
+          selected={selected}
+          upnlAsOf={upnl?.as_of}
+          combined={upnl?.combined_upnl}
+          perAccount={upnl?.per_account_upnl}
+        />
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <MonthlyDrawdownCard perAccounts={perAccounts} selected={selected} range={range} earliest={earliest} />
+          <MonthlyDrawdownCard perAccounts={perAccounts} />
           <ConsecutiveLosingDaysCard perAccounts={perAccounts} />
           {merged ? <PnLPerSymbolCard merged={merged} /> : null}
           {merged ? <PnLPerPairCard merged={merged} /> : null}
-          {merged ? <ReturnsCard merged={merged} /> : null}
+          {merged ? (
+            <ReturnsCard merged={merged} liveUpnl={upnl?.combined_upnl} />
+          ) : null}
         </div>
       </section>
+
+      {loading ? (
+        <div className="pointer-events-none fixed inset-0 grid place-items-center bg-background/40 backdrop-blur-sm">
+          <div className="glass-card px-4 py-3 rounded-xl shadow-lg border flex items-center gap-3">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            <span className="text-sm">Loading charts…</span>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

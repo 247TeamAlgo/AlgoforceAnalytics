@@ -17,6 +17,7 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart";
 import type { MetricsSlim } from "../../lib/types";
+import { fmtUsd } from "../../lib/types";
 
 type Row = { day: string; cum: number };
 
@@ -33,7 +34,13 @@ function buildCum(merged: MetricsSlim): Row[] {
   });
 }
 
-export default function ReturnsCard({ merged }: { merged: MetricsSlim }) {
+export default function ReturnsCard({
+  merged,
+  liveUpnl, // optional live overlay (not baked into series)
+}: {
+  merged: MetricsSlim;
+  liveUpnl?: number;
+}) {
   const kpi = merged.total_return_pct_over_window ?? 0;
   const data = React.useMemo(() => buildCum(merged), [merged]);
 
@@ -56,6 +63,20 @@ export default function ReturnsCard({ merged }: { merged: MetricsSlim }) {
             {kpi.toFixed(2)}%
           </div>
           <div className="text-sm text-muted-foreground">cumulative net</div>
+          {typeof liveUpnl === "number" ? (
+            <div className="ml-auto text-sm">
+              <span className="text-muted-foreground">Live UPNL:</span>{" "}
+              <span
+                className={
+                  liveUpnl >= 0
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-red-600 dark:text-red-400"
+                }
+              >
+                {fmtUsd(liveUpnl)}
+              </span>
+            </div>
+          ) : null}
         </div>
 
         <div className="mt-4">

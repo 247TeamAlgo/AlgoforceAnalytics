@@ -6,6 +6,7 @@ import type {
   HeavyResponse,
   MetricsSlim,
 } from "@/app/(analytics)/analytics/lib/types";
+import { useUpnl } from "./useUpnl";
 
 /* ----------------------------- local types ----------------------------- */
 
@@ -15,19 +16,27 @@ export interface DateRange {
 }
 
 export interface AnalyticsData {
-  accounts: Account[]; // always an array
-  selected: string[]; // redisName[]
+  accounts: Account[];
+  selected: string[];
   setSelected: React.Dispatch<React.SetStateAction<string[]>>;
   range: DateRange;
   setRange: React.Dispatch<React.SetStateAction<DateRange>>;
   earliest: boolean;
   setEarliest: React.Dispatch<React.SetStateAction<boolean>>;
-  loading: boolean;
-  error: string | null;
+  loading: boolean; // heavy fetch loading
+  error: string | null; // heavy fetch error
   rawJson: HeavyResponse | null;
   merged: MetricsSlim | null;
   perAccounts?: Record<string, MetricsSlim>;
   onAutoFetch: () => Promise<void>;
+
+  // Live UPNL overlay (light endpoint)
+  upnlMap: Record<string, number>; // ALWAYS defined (can be empty)
+  combinedUpnl?: number;
+  upnlAsOf?: string;
+  upnlLoading: boolean;
+  upnlError: string | null;
+  refetchUpnl: () => Promise<void>;
 }
 
 /* ----------------------------- safe helpers ---------------------------- */
@@ -49,14 +58,10 @@ function normalizeAccounts(v: unknown): Account[] {
 async function fetchAccountsSafe(): Promise<Account[]> {
   try {
     const res = await fetch("/api/accounts", { cache: "no-store" });
-    if (!res.ok) {
-      console.error("[accounts] HTTP", res.status);
-      return [];
-    }
+    if (!res.ok) return [];
     const data = (await res.json()) as unknown;
     return normalizeAccounts(data);
-  } catch (e) {
-    console.error("[accounts] fetch failed:", e);
+  } catch {
     return [];
   }
 }
@@ -111,13 +116,11 @@ export function useAnalyticsData(): AnalyticsData {
 
       setAccounts(all);
 
-      // Default selection = monitored accounts (if any)
       const monitored = all
         .filter((a) => Boolean(a?.monitored))
         .map((a) => a.redisName);
       setSelected(monitored);
 
-      // Default range = last 30 days (UTC)
       const end = new Date();
       const start = new Date(
         Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate() - 30)
@@ -127,7 +130,6 @@ export function useAnalyticsData(): AnalyticsData {
       setEarliest(false);
     })().catch((e) => {
       if (!alive) return;
-      console.error("[bootstrap] failed:", e);
       setError(e instanceof Error ? e.message : "Failed to initialize");
     });
 
@@ -148,19 +150,39 @@ export function useAnalyticsData(): AnalyticsData {
       const data = await fetchHeavy(selected, range, earliest);
       setRawJson(data);
 
-      // If backend supplies accounts, prefer that (keeps UI in sync)
       if (Array.isArray(data.accounts) && data.accounts.length > 0) {
         setAccounts(normalizeAccounts(data.accounts));
       }
-    } catch (e: unknown) {
+    } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to build metrics";
-      console.error("[heavy] error:", msg);
       setError(msg);
       setRawJson(null);
     } finally {
       setLoading(false);
     }
   }, [selected, range, earliest]);
+
+  // Run once and every 30 minutes
+  useEffect(() => {
+    const run = (): void => {
+      void onAutoFetch();
+    };
+    run();
+    const id = window.setInterval(run, 30 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, [onAutoFetch]);
+
+  // LIGHT: live UPNL (frequent poll)
+  const {
+    data: upnlData,
+    loading: upnlLoading,
+    error: upnlError,
+    refetch: refetchUpnl,
+  } = useUpnl(selected, {
+    pollMs: 10_000,
+    jitterMs: 200,
+    errorBackoffMs: 2_000,
+  });
 
   const merged = useMemo<MetricsSlim | null>(
     () => (rawJson ? rawJson.merged : null),
@@ -171,6 +193,25 @@ export function useAnalyticsData(): AnalyticsData {
     () => (rawJson ? rawJson.per_account : undefined),
     [rawJson]
   );
+
+  // ALWAYS provide a map (can be empty). No gating on perAccounts.
+  const upnlMap = useMemo<Record<string, number>>(() => {
+    const src = upnlData?.per_account_upnl ?? {};
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(src)) {
+      const n = typeof v === "number" ? v : Number(v);
+      out[k] = Number.isFinite(n) ? n : 0;
+    }
+    return out;
+  }, [upnlData?.per_account_upnl]);
+
+  const combinedUpnl = useMemo<number | undefined>(() => {
+    const v = upnlData?.combined_upnl;
+    const n = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  }, [upnlData?.combined_upnl]);
+
+  const upnlAsOf = upnlData?.as_of ?? undefined;
 
   return {
     accounts,
@@ -186,6 +227,13 @@ export function useAnalyticsData(): AnalyticsData {
     merged,
     perAccounts,
     onAutoFetch,
+
+    upnlMap,
+    combinedUpnl,
+    upnlAsOf,
+    upnlLoading,
+    upnlError,
+    refetchUpnl,
   };
 }
 

@@ -4,7 +4,6 @@ import type { Redis } from "ioredis";
 /* ---------- minimal shapes we can rely on ---------- */
 export interface UpnlRow {
   unrealizedProfit?: number | string;
-  // other fields ignored
 }
 export interface RedisArrayContainer {
   rows?: UpnlRow[];
@@ -24,7 +23,7 @@ export interface TradesheetRow {
   [k: string]: unknown;
 }
 
-/* -------------------- numeric helper ----------------------- */
+/* ---------------- numeric helper ---------------- */
 function num(v: unknown): number {
   if (typeof v === "number") return Number.isFinite(v) ? v : 0;
   if (typeof v === "string") {
@@ -34,36 +33,11 @@ function num(v: unknown): number {
   return 0;
 }
 
-function sumUnknownValues(values: readonly unknown[]): number {
-  return values.reduce<number>((s, v) => s + num(v), 0);
-}
-
-/* ----------------- thin redis getter (JSON) ----------------- */
-export async function redisGetJSON(
-  r: Redis,
-  key: string
-): Promise<unknown | null> {
-  const raw = await r.get(key);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    // some feeds store python-dict-like strings in JSON; try to salvage
-    const coerced = tryCoercePythonishToJson(raw);
-    if (coerced) return coerced;
-    return null;
-  }
-}
-
 /* --------- coerce python-ish dict string into JSON ---------- */
 export function tryCoercePythonishToJson(raw: string): unknown | null {
-  // quick heuristic: looks like "{'0': '...'}" or contains "False"/"True"
   if (!/[{[]/.test(raw)) return null;
   let s = raw.trim();
-  // replace single quotes with double quotes carefully:
-  // this is best-effort; content is numbers/words, not nested quotes
   s = s.replace(/'/g, '"');
-  // booleans/none
   s = s
     .replace(/\bFalse\b/g, "false")
     .replace(/\bTrue\b/g, "true")
@@ -75,12 +49,83 @@ export function tryCoercePythonishToJson(raw: string): unknown | null {
   }
 }
 
+/* ----------------- thin redis getter (JSON or CSV) ----------------- */
+export async function redisGetJSON(
+  r: Redis,
+  key: string
+): Promise<unknown | null> {
+  const raw = await r.get(key);
+  if (!raw) return null;
+
+  // Try proper JSON first
+  try {
+    return JSON.parse(raw);
+  } catch {
+    // Not JSON; may be python-ish dict OR CSV columnar text
+    const coerced = tryCoercePythonishToJson(raw);
+    if (coerced) return coerced;
+
+    // If it looks like CSV and contains the unrealizedProfit column, return raw for CSV path
+    if (raw.includes(",") && /(^|,) *unrealizedProfit *(,|$)/i.test(raw)) {
+      return raw;
+    }
+    return null;
+  }
+}
+
+/* ---------------- CSV helpers ------------------- */
+
+/** very light CSV -> array of row objects (no quoted commas expected) */
+function parseCsvLoose(csv: string): Array<Record<string, string>> {
+  const lines = csv.split(/\r?\n/).filter((ln) => ln.trim().length > 0);
+  if (!lines.length) return [];
+  const headers = lines[0]!.split(",").map((h) => h.trim());
+  const out: Array<Record<string, string>> = [];
+  for (let i = 1; i < lines.length; i += 1) {
+    const cols = lines[i]!.split(",");
+    const row: Record<string, string> = {};
+    headers.forEach((h, j) => {
+      row[h] = (cols[j] ?? "").trim();
+    });
+    out.push(row);
+  }
+  return out;
+}
+
+/** CSV where the 'unrealizedProfit' cell is a python-ish dict string */
+function extractUpnlFromCsvString(rawCsv: string): number {
+  const rows = parseCsvLoose(rawCsv);
+  if (!rows.length) return 0;
+
+  const cell =
+    rows[0]["unrealizedProfit"] ??
+    rows[0]["UNREALIZEDPROFIT"] ??
+    rows[0]["UnrealizedProfit"];
+  if (!cell) return 0;
+
+  const dict = tryCoercePythonishToJson(cell);
+  if (dict && typeof dict === "object" && !Array.isArray(dict)) {
+    const vals = Object.values(dict as Record<string, unknown>);
+    return vals.reduce<number>((s, v) => s + num(v), 0);
+  }
+
+  // Fallback: it may be a flat number string
+  return num(cell);
+}
+
 /* --------------- extract UPNL from many shapes -------------- */
 export function extractUpnlSum(payload: unknown): number {
+  // CSV columnar string case
+  if (typeof payload === "string" && payload.includes(",")) {
+    if (/(^|,) *unrealizedProfit *(,|$)/i.test(payload)) {
+      return extractUpnlFromCsvString(payload);
+    }
+  }
+
   // Arrays of rows with {unrealizedProfit}
   if (Array.isArray(payload)) {
     return (payload as UpnlRow[]).reduce<number>(
-      (s, row) => s + num(row?.unrealizedProfit),
+      (s, row) => s + num((row as UpnlRow)?.unrealizedProfit),
       0
     );
   }
@@ -91,28 +136,30 @@ export function extractUpnlSum(payload: unknown): number {
     // containers with rows/data arrays
     if (Array.isArray(obj.rows)) {
       return (obj.rows as UpnlRow[]).reduce<number>(
-        (s, row) => s + num(row?.unrealizedProfit),
+        (s, row) => s + num((row as UpnlRow)?.unrealizedProfit),
         0
       );
     }
     if (Array.isArray(obj.data)) {
       return (obj.data as UpnlRow[]).reduce<number>(
-        (s, row) => s + num(row?.unrealizedProfit),
+        (s, row) => s + num((row as UpnlRow)?.unrealizedProfit),
         0
       );
     }
 
     // columnar dict-like: { unrealizedProfit: { '0': '1.23', ... } }
-    const col = obj["unrealizedProfit"];
+    const col = (obj as DictLike)["unrealizedProfit"];
     if (col && typeof col === "object" && !Array.isArray(col)) {
-      return sumUnknownValues(Object.values(col as DictLike));
+      const vals = Object.values(col as Record<string, unknown>);
+      return vals.reduce<number>((s, v) => s + num(v), 0);
     }
 
-    // pythonish-as-string inside a property
+    // pythonish-as-string inside property
     if (typeof col === "string") {
       const coerced = tryCoercePythonishToJson(col);
       if (coerced && typeof coerced === "object" && !Array.isArray(coerced)) {
-        return sumUnknownValues(Object.values(coerced as DictLike));
+        const vals = Object.values(coerced as Record<string, unknown>);
+        return vals.reduce<number>((s, v) => s + num(v), 0);
       }
     }
   }
@@ -128,33 +175,45 @@ export async function loadUpnlSum(
   return extractUpnlSum(data);
 }
 
-/* ------------------- tradesheet pair mapping ----------------- */
+/** Try multiple candidate names (e.g., redisName, binanceName) and pick the first */
+export async function loadUpnlSumMulti(
+  r: Redis,
+  redisNames: string[]
+): Promise<number> {
+  for (const name of redisNames) {
+    const raw = await r.get(`${name}_live`);
+    if (!raw) continue;
 
-/** very light CSV parser (no quotes in your sample), returns array of dicts */
-function parseCsvLoose(csv: string): TradesheetRow[] {
-  const lines = csv.split(/\r?\n/).filter((ln) => ln.trim().length > 0);
-  if (!lines.length) return [];
-  const headers = lines[0]!.split(",").map((h) => h.trim());
-  const out: TradesheetRow[] = [];
-  for (let i = 1; i < lines.length; i += 1) {
-    const cols = lines[i]!.split(",");
-    const row: Record<string, string> = {};
-    headers.forEach((h, j) => {
-      row[h] = (cols[j] ?? "").trim();
-    });
-    out.push(row as unknown as TradesheetRow);
+    // Try JSON first
+    try {
+      const parsed = JSON.parse(raw);
+      return extractUpnlSum(parsed);
+    } catch {
+      // pythonish or CSV
+      const coerced = tryCoercePythonishToJson(raw);
+      if (coerced !== null) return extractUpnlSum(coerced);
+      if (raw.includes(",") && /(^|,) *unrealizedProfit *(,|$)/i.test(raw)) {
+        return extractUpnlFromCsvString(raw);
+      }
+    }
   }
-  return out;
+  return 0;
 }
 
+/* ------------------- tradesheet pair mapping ----------------- */
 export type PairMap = Map<string, string>; // orderId(string) -> pair(upper)
+
+function parseTradesheetCsv(csv: string): TradesheetRow[] {
+  const rows = parseCsvLoose(csv);
+  return rows as unknown as TradesheetRow[];
+}
 
 export function extractTradesheetPairs(payload: unknown): PairMap {
   const map: PairMap = new Map();
 
   const rows: TradesheetRow[] = (() => {
     if (typeof payload === "string" && payload.includes(",")) {
-      return parseCsvLoose(payload);
+      return parseTradesheetCsv(payload);
     }
     if (Array.isArray(payload)) return payload as TradesheetRow[];
     if (payload && typeof payload === "object") {
