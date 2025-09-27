@@ -32,18 +32,10 @@ import {
   ChartContainer,
   ChartTooltip,
 } from "@/components/ui/chart";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 
-import type { MetricsPayload } from "../../lib/types";
-import type { DateRange } from "../../hooks/useAnalyticsData";
-import { useDrawdownBars } from "../../hooks/useDrawdownBars";
+import type { MetricsSlim } from "../../lib/types";
 
-/** Negative decimal; -0.035 == -3.5% */
+/** Negative decimal thresholds; e.g. -0.10 means -10% */
 type ThresholdLevel = { value: number; label?: string };
 
 type Row = {
@@ -62,55 +54,6 @@ function pctFromDecimal(v: number): string {
 }
 function pctFromMag(m: number): string {
   return `-${(m * 100).toFixed(2)}%`;
-}
-
-/* ------------------------ client fallback math ------------------------ */
-function minDrawdownMagnitude(payload: MetricsPayload): number {
-  const rows = payload.daily_return_last_n_days.daily_rows;
-  if (!rows.length) return 0;
-
-  let equity =
-    typeof rows[0]?.start_balance === "number"
-      ? rows[0]!.start_balance
-      : payload.initial_balance;
-
-  let peak = equity;
-  let minDD = 0;
-  for (const r of rows) {
-    equity =
-      typeof r.end_balance === "number" ? r.end_balance : equity + r.net_pnl;
-    if (equity > peak) peak = equity;
-    const dd = peak > 0 ? equity / peak - 1 : 0;
-    if (dd < minDD) minDD = dd;
-  }
-  return Math.abs(minDD);
-}
-
-function combinedDrawdownMagnitude(
-  perAccounts: Record<string, MetricsPayload>
-): number {
-  const list = Object.values(perAccounts);
-  if (!list.length) return 0;
-
-  const byDay = new Map<string, number>();
-  for (const p of list) {
-    for (const r of p.daily_return_last_n_days.daily_rows) {
-      const prev = byDay.get(r.day) ?? 0;
-      byDay.set(r.day, prev + r.net_pnl);
-    }
-  }
-  const days = [...byDay.keys()].sort();
-
-  let equity = list.reduce((s, p) => s + p.initial_balance, 0);
-  let peak = equity;
-  let minDD = 0;
-  for (const d of days) {
-    equity += byDay.get(d) ?? 0;
-    if (equity > peak) peak = equity;
-    const dd = peak > 0 ? equity / peak - 1 : 0;
-    if (dd < minDD) minDD = dd;
-  }
-  return Math.abs(minDD);
 }
 
 /* --------------------------- layout helpers --------------------------- */
@@ -134,12 +77,14 @@ function useMeasure<T extends HTMLElement>(): [
 }
 
 /* ------------------------------- build ------------------------------- */
-function buildRowsFromBackend(
+function buildRows(
   mags: number[],
   levelColors: string[],
   defaultBarColor: string,
-  perAccount: Array<{ account: string; dd_mag: number }>,
-  combined: { account: string; dd_mag: number } | null
+  perAccounts?: Record<string, MetricsSlim>,
+  includeCombined?: boolean,
+  combinedLabel?: string,
+  merged?: MetricsSlim | null
 ): Row[] {
   const toRow = (label: string, mag: number): Row => {
     let idx = -1;
@@ -152,51 +97,17 @@ function buildRowsFromBackend(
     return { account: label, ddMag: mag, crossedIndex: idx, color };
   };
 
-  const accounts = perAccount
-    .map((r) => toRow(r.account, r.dd_mag))
-    .sort((a, b) => b.ddMag - a.ddMag);
+  const rows: Row[] = perAccounts
+    ? Object.entries(perAccounts)
+        .map(([account, payload]) => toRow(account, payload.drawdown_mag ?? 0))
+        .sort((a, b) => b.ddMag - a.ddMag)
+    : [];
 
-  return combined
-    ? [...accounts, toRow(combined.account, combined.dd_mag)]
-    : accounts;
-}
-
-function buildRowsFromClient(
-  mags: number[],
-  levelColors: string[],
-  defaultBarColor: string,
-  perAccounts: Record<string, MetricsPayload>,
-  includeCombined: boolean,
-  combinedLabel: string
-): Row[] {
-  const accountRows: Row[] = Object.entries(perAccounts)
-    .map(([account, payload]) => {
-      const mag = minDrawdownMagnitude(payload);
-      let idx = -1;
-      for (let i = 0; i < mags.length; i += 1) {
-        if (mag >= mags[i]) idx = i;
-        else break;
-      }
-      const color =
-        idx >= 0 ? (levelColors[idx] ?? defaultBarColor) : defaultBarColor;
-      return { account, ddMag: mag, crossedIndex: idx, color };
-    })
-    .sort((a, b) => b.ddMag - a.ddMag);
-
-  if (!includeCombined) return accountRows;
-
-  const mag = combinedDrawdownMagnitude(perAccounts);
-  let idx = -1;
-  for (let i = 0; i < mags.length; i += 1) {
-    if (mag >= mags[i]) idx = i;
-    else break;
+  if (includeCombined && merged) {
+    rows.push(toRow(combinedLabel ?? "all", merged.drawdown_mag ?? 0));
   }
-  const color =
-    idx >= 0 ? (levelColors[idx] ?? defaultBarColor) : defaultBarColor;
-  return [
-    ...accountRows,
-    { account: combinedLabel, ddMag: mag, crossedIndex: idx, color },
-  ];
+
+  return rows;
 }
 
 /* ------------------------------ tooltip ------------------------------ */
@@ -210,7 +121,7 @@ type TooltipProps = {
 function CombinedDDTooltip(props: TooltipProps) {
   const { active, payload, legend, mags } = props;
   const item = payload?.[0];
-  if (!active || !item) return null;
+  if (!active || item == null) return null;
 
   const val = Number(item.value ?? 0);
   const row = item.payload as Row;
@@ -283,16 +194,10 @@ function CombinedDDTooltip(props: TooltipProps) {
 
 /* ---------------------------- component ---------------------------- */
 export default function CombinedDrawdownCard({
-  // backend mode
-  selected,
-  range,
-  earliest,
-  tz = "Asia/Manila",
-
-  // client-fallback mode
   perAccounts,
+  merged,
 
-  // shared UI knobs
+  // thresholds & styling
   levels = [
     { value: -0.035, label: "-3.5%" },
     { value: -0.05, label: "-5.0%" },
@@ -311,34 +216,15 @@ export default function CombinedDrawdownCard({
   includeCombined = true,
   combinedLabel = "all",
 }: {
-  // backend mode (optional)
-  selected?: string[];
-  range?: DateRange;
-  earliest?: boolean;
-  tz?: string;
+  perAccounts?: Record<string, MetricsSlim>;
+  merged?: MetricsSlim | null;
 
-  // client-fallback mode (optional)
-  perAccounts?: Record<string, MetricsPayload>;
-
-  // shared UI
   levels?: ThresholdLevel[];
   levelColors?: string[];
   defaultBarColor?: string;
   includeCombined?: boolean;
   combinedLabel?: string;
 }) {
-  const canFetch =
-    (selected?.length ?? 0) > 0 &&
-    Boolean(range?.end) &&
-    (Boolean(range?.start) || Boolean(earliest));
-
-  const { data, loading, error } = useDrawdownBars(
-    canFetch ? (selected as string[]) : [],
-    canFetch ? (range as DateRange) : {},
-    Boolean(earliest),
-    tz
-  );
-
   const orderedLevels = React.useMemo(
     () => [...levels].sort((a, b) => Math.abs(a.value) - Math.abs(b.value)),
     [levels]
@@ -348,50 +234,38 @@ export default function CombinedDrawdownCard({
     [orderedLevels]
   );
 
-  // Build rows: prefer backend payload, else client computation
-  const rows: Row[] = React.useMemo(() => {
-    if (data) {
-      return buildRowsFromBackend(
-        mags,
-        levelColors,
-        defaultBarColor,
-        data.per_account.map((r) => ({ account: r.account, dd_mag: r.dd_mag })),
-        data.combined
-      );
-    }
-    if (perAccounts && Object.keys(perAccounts).length) {
-      return buildRowsFromClient(
+  const rows: Row[] = React.useMemo(
+    () =>
+      buildRows(
         mags,
         levelColors,
         defaultBarColor,
         perAccounts,
         includeCombined,
-        combinedLabel
-      );
-    }
-    return [];
-  }, [
-    data,
-    perAccounts,
-    mags,
-    levelColors,
-    defaultBarColor,
-    includeCombined,
-    combinedLabel,
-  ]);
+        combinedLabel,
+        merged ?? null
+      ),
+    [
+      mags,
+      levelColors,
+      defaultBarColor,
+      perAccounts,
+      includeCombined,
+      combinedLabel,
+      merged,
+    ]
+  );
 
   const maxData = rows.reduce((m, r) => Math.max(m, r.ddMag), 0);
   const maxLevel = mags.reduce((m, v) => Math.max(m, v), 0);
   const xMax = Math.max(maxData, maxLevel) * 1.06 || 0.02;
 
-  // FULL threshold set (do not truncate)
   const legendAll = orderedLevels.map((l, i) => ({
     x: Math.abs(l.value),
     label: l.label ?? pctFromDecimal(l.value),
     color: levelColors[i] ?? defaultBarColor,
   }));
 
-  // Counts per ALL levels
   const crossedCountsAll = mags.map(
     (m) => rows.filter((r) => r.ddMag >= m).length
   );
@@ -467,48 +341,29 @@ export default function CombinedDrawdownCard({
         </div>
 
         {/* FULL legend */}
-        <TooltipProvider>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            {legendAll.map((it, i) => (
-              <Tooltip key={it.label}>
-                <TooltipTrigger asChild>
-                  <span
-                    className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs cursor-default"
-                    title={it.label}
-                  >
-                    <span
-                      aria-hidden
-                      className="h-2.5 w-2.5 rounded-[3px]"
-                      style={{ backgroundColor: it.color }}
-                    />
-                    <span className="text-muted-foreground">{it.label}</span>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent className="text-xs">
-                  <div className="font-medium mb-1">
-                    Level {i + 1} • {it.label}
-                  </div>
-                  <div className="text-muted">
-                    Triggers when any account’s min drawdown ≤ {it.label}.
-                  </div>
-                  <div className="mt-1">
-                    Crossed by{" "}
-                    <span className="font-medium">{crossedCountsAll[i]}</span>{" "}
-                    account{crossedCountsAll[i] === 1 ? "" : "s"}.
-                  </div>
-                </TooltipContent>
-              </Tooltip>
-            ))}
-          </div>
-        </TooltipProvider>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {legendAll.map((it, i) => (
+            <span
+              key={it.label}
+              className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs cursor-default"
+              title={it.label}
+            >
+              <span
+                aria-hidden
+                className="h-2.5 w-2.5 rounded-[3px]"
+                style={{ backgroundColor: it.color }}
+              />
+              <span className="text-muted-foreground">{it.label}</span>
+              <span className="text-muted-foreground">
+                ({crossedCountsAll[i]})
+              </span>
+            </span>
+          ))}
+        </div>
       </CardHeader>
 
       <CardContent ref={contentRef} className="p-2">
-        {error ? (
-          <div className="text-sm text-destructive pb-2">{error}</div>
-        ) : null}
-
-        {!rows.length && !loading ? (
+        {!rows.length ? (
           <div className="text-sm text-muted-foreground py-10 text-center">
             No data.
           </div>

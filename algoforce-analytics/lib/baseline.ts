@@ -1,3 +1,4 @@
+// lib/baseline.ts
 import fs from "node:fs";
 
 export function readBaselineUsd(account: string): number {
@@ -8,12 +9,15 @@ export function readBaselineUsd(account: string): number {
     const txt = fs.readFileSync(path, "utf-8");
     const json = JSON.parse(txt) as Record<string, number>;
     const key = account.toLowerCase();
-    const v = json[key] ?? json[account] ?? 0;
-    if (typeof v !== "number") return 0;
+    const v = json[key] ?? json[account];
+    if (typeof v !== "number") {
+      throw new Error(`baseline missing or not a number for "${account}"`);
+    }
     return v;
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error(`[baseline] failed to read ${path}:`, err);
-    return 0;
+    // surface upstream — caller will aggregate per-request error policy
+    throw new Error(
+      `[baseline] failed to read "${account}" from ${path}: ${String(err)}`
+    );
   }
 }

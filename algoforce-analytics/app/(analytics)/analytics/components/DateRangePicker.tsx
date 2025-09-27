@@ -1,3 +1,4 @@
+// app/(analytics)/analytics/components/DateRangePicker.tsx
 "use client";
 
 import * as React from "react";
@@ -25,23 +26,24 @@ type Props = {
   className?: string;
 };
 
+const UTC_FMT = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "UTC",
+  month: "short",
+  day: "2-digit",
+  year: "numeric",
+});
+
 function toISO(d: Date) {
   return d.toISOString().slice(0, 10);
 }
 function fromISO(s?: string) {
   if (!s) return undefined;
   const [y, m, d] = s.split("-").map(Number);
-  return new Date(y, (m ?? 1) - 1, d ?? 1);
+  return new Date(Date.UTC(y, (m ?? 1) - 1, d ?? 1));
 }
 function pretty(s?: string) {
-  const d = fromISO(s);
-  return d
-    ? d.toLocaleDateString(undefined, {
-        month: "short",
-        day: "2-digit",
-        year: "numeric",
-      })
-    : "";
+  if (!s) return "";
+  return UTC_FMT.format(new Date(`${s}T00:00:00Z`));
 }
 function todayISO(): string {
   return toISO(new Date());
@@ -125,7 +127,7 @@ export default function DateRangePicker({
           disabled={disabled}
           className={cn("w-full justify-between h-10", className)}
         >
-          <span className="truncate">
+          <span className="truncate" suppressHydrationWarning>
             <CalendarIcon className="inline -mt-0.5 mr-2 h-4 w-4 opacity-70" />
             {triggerLabel}
           </span>

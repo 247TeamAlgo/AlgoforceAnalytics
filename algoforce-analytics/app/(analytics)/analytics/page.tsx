@@ -1,3 +1,4 @@
+// app/(analytics)/page.tsx
 "use client";
 
 import { useEffect } from "react";
@@ -6,7 +7,7 @@ import { Card } from "@/components/ui/card";
 
 import { useAnalyticsData } from "./hooks/useAnalyticsData";
 import Controls from "./components/Controls";
-import CombinedDrawdownCard from "./components/performance-metrics/CombinedDrawdownCard";
+import MonthlyDrawdownCard from "./components/performance-metrics/CombinedDrawdownCard";
 import ConsecutiveLosingDaysCard from "./components/performance-metrics/ConsecutiveLosingDaysCard";
 import PnLPerSymbolCard from "./components/performance-metrics/PnLPerSymbolCard";
 import ReturnsCard from "./components/performance-metrics/ReturnsCard";
@@ -28,9 +29,23 @@ export default function AnalyticsPage() {
     onAutoFetch,
   } = useAnalyticsData();
 
+  // 1) As soon as accounts load, ensure we have a non-empty selection.
+  useEffect(() => {
+    if (selected.length === 0 && accounts.length > 0) {
+      const monitored = accounts
+        .filter((a) => Boolean(a.monitored))
+        .map((a) => a.redisName);
+
+      // Prefer monitored; else fall back to all accounts.
+      setSelected(monitored.length > 0 ? monitored : accounts.map((a) => a.redisName));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accounts.length]);
+
+  // 2) Trigger heavy fetch when selection and date window are ready.
   useEffect(() => {
     const hasExplicit = Boolean(range.start && range.end);
-    if (selected.length && (hasExplicit || (earliest && range.end))) {
+    if (selected.length > 0 && (hasExplicit || (earliest && range.end))) {
       void onAutoFetch();
     }
   }, [selected.length, range.start, range.end, earliest, onAutoFetch]);
@@ -55,32 +70,16 @@ export default function AnalyticsPage() {
           setEarliest={setEarliest}
           loading={loading}
           error={error}
-          onAutoFetch={onAutoFetch}
         />
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          {/* NEW: fetch server rows in the card */}
-          <CombinedDrawdownCard
-            selected={selected}
-            range={range}
-            earliest={earliest}
-          />
-
+          <MonthlyDrawdownCard perAccounts={perAccounts} selected={selected} range={range} earliest={earliest} />
           <ConsecutiveLosingDaysCard perAccounts={perAccounts} />
           {merged ? <PnLPerSymbolCard merged={merged} /> : null}
           {merged ? <PnLPerPairCard merged={merged} /> : null}
           {merged ? <ReturnsCard merged={merged} /> : null}
         </div>
       </section>
-
-      {loading ? (
-        <div className="pointer-events-none fixed inset-0 grid place-items-center bg-background/40 backdrop-blur-sm">
-          <div className="glass-card px-4 py-3 rounded-xl shadow-lg border flex items-center gap-3">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            <span className="text-sm">Loading charts…</span>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

@@ -1,23 +1,23 @@
+// app/api/accounts/route.ts
 import { NextResponse } from "next/server";
-import {
-  readAccounts,
-  type Account,
-} from "@/lib/jsonStore";
+import { ACCOUNTS_INFO } from "@/app/api/v1/1-performance_metrics/calculators/accounts_json";
 
-export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-function noStore(res: NextResponse): NextResponse {
-  res.headers.set("Cache-Control", "no-store");
-  return res;
-}
-
-export async function GET(): Promise<NextResponse> {
+export async function GET() {
   try {
-    const data = await readAccounts();
-    return noStore(NextResponse.json<Account[]>(data, { status: 200 }));
+    if (!Array.isArray(ACCOUNTS_INFO)) {
+      return NextResponse.json({ error: "Accounts not configured" }, { status: 500 });
+    }
+    return NextResponse.json(ACCOUNTS_INFO, {
+      status: 200,
+      headers: { "Cache-Control": "private, max-age=30" },
+    });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to read";
-    return noStore(NextResponse.json({ error: msg }, { status: 500 }));
+    return NextResponse.json(
+      { error: (err as Error).message ?? "Failed to load accounts" },
+      { status: 500 }
+    );
   }
 }

@@ -1,3 +1,4 @@
+// app/(analytics)/analytics/components/performance-metrics/PnLPerSymbolCard.tsx
 "use client";
 
 import * as React from "react";
@@ -23,13 +24,7 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import type { MetricsPayload, HistoricalBucket } from "../../lib/types";
+import type { MetricsSlim } from "../../lib/types";
 import { fmtUsd } from "../../lib/types";
 
 type Row = { label: string; total: number };
@@ -48,17 +43,14 @@ const NEG_HEX = "#f6465d";
 
 const chartConfig: ChartConfig = {
   pos: { label: "Profit", color: POS_HEX }, // green
-  neg: { label: "Loss", color: NEG_HEX },   // red
+  neg: { label: "Loss", color: NEG_HEX }, // red
 };
 
-function build(merged: MetricsPayload, topN = 12): Row[] {
-  const buckets: HistoricalBucket[] | undefined = merged.historical?.perSymbol;
-  if (!buckets?.length) return [];
+function build(merged: MetricsSlim, topN = 12): Row[] {
+  const buckets = merged.pnl_per_symbol ?? [];
+  if (!buckets.length) return [];
   return [...buckets]
-    .map((b) => ({
-      label: b.label,
-      total: Number((b.pnl_pos + b.pnl_neg).toFixed(2)),
-    }))
+    .map((b) => ({ label: b.label, total: Number(b.total.toFixed(2)) }))
     .sort((a, b) => Math.abs(b.total) - Math.abs(a.total))
     .slice(0, topN);
 }
@@ -82,7 +74,7 @@ function maxAbsDomain(rows: DivergingRow[]): [number, number] {
   return [-m, m];
 }
 
-/** Resize observer hook (mirrors CombinedDrawdownCard). */
+/** Resize observer hook (mirrors Drawdown card). */
 function useMeasure<T extends HTMLElement>(): [
   React.MutableRefObject<T | null>,
   { width: number; height: number },
@@ -124,7 +116,7 @@ function DivergingValueLabel(raw: unknown) {
   );
 }
 
-export default function PnLPerSymbolCard({ merged }: { merged: MetricsPayload }) {
+export default function PnLPerSymbolCard({ merged }: { merged: MetricsSlim }) {
   const rows = React.useMemo(() => build(merged), [merged]);
   const data = React.useMemo(() => toDiverging(rows), [rows]);
   const domain = React.useMemo(() => maxAbsDomain(data), [data]);
@@ -170,54 +162,20 @@ export default function PnLPerSymbolCard({ merged }: { merged: MetricsPayload })
 
   return (
     <Card className="py-0">
-      {/* Header + toolbar (legend pills), same pattern as CombinedDrawdownCard */}
+      {/* Header + toolbar (legend pills), same pattern as Drawdown card */}
       <CardHeader className="border-b !p-0">
         <div className="px-6 pt-4 pb-2 sm:py-3">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <CardTitle className="leading-tight">Total PnL per Symbol</CardTitle>
+              <CardTitle className="leading-tight">
+                Total PnL per Symbol
+              </CardTitle>
               <CardDescription className="mt-0.5">
-                Zero-centered; losses left, profits right. Symmetric scale ±{fmtUsd(maxAbs)}.
+                Zero-centered; losses left, profits right. Symmetric scale ±
+                {fmtUsd(maxAbs)}.
               </CardDescription>
             </div>
           </div>
-
-          {/* Toolbar legend pills */}
-          <TooltipProvider>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs cursor-default">
-                    <span
-                      aria-hidden
-                      className="h-2.5 w-2.5 rounded-[3px]"
-                      style={{ backgroundColor: POS_HEX }}
-                    />
-                    <span className="text-muted-foreground">Profit</span>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent className="text-xs">
-                  Positive net PnL extends to the right from zero.
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs cursor-default">
-                    <span
-                      aria-hidden
-                      className="h-2.5 w-2.5 rounded-[3px]"
-                      style={{ backgroundColor: NEG_HEX }}
-                    />
-                    <span className="text-muted-foreground">Loss</span>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent className="text-xs">
-                  Negative net PnL extends to the left from zero.
-                </TooltipContent>
-              </Tooltip>
-            </div>
-          </TooltipProvider>
         </div>
       </CardHeader>
 
@@ -278,7 +236,7 @@ export default function PnLPerSymbolCard({ merged }: { merged: MetricsPayload })
               <Bar
                 dataKey="neg"
                 stackId="pnl"
-                fill="var(--color-neg)"
+                fill={NEG_HEX}
                 radius={[4, 0, 0, 4]}
                 barSize={barSize}
               >
@@ -287,7 +245,7 @@ export default function PnLPerSymbolCard({ merged }: { merged: MetricsPayload })
               <Bar
                 dataKey="pos"
                 stackId="pnl"
-                fill="var(--color-pos)"
+                fill={POS_HEX}
                 radius={[0, 4, 4, 0]}
                 barSize={barSize}
               >

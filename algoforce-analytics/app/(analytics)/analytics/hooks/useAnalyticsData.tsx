@@ -1,19 +1,22 @@
 "use client";
-// app/(analytics)/analytics/hooks/useAnalyticsData.tsx
-import { Account } from "@/lib/jsonStore";
-import { MetricsPayload } from "@/lib/types";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { MultiMetricsResponse, isMultiSelectionResponse } from "../lib/types";
-import { generateDummyMetrics } from "../data/dummy";
+import type {
+  Account,
+  HeavyResponse,
+  MetricsSlim,
+} from "@/app/(analytics)/analytics/lib/types";
+
+/* ----------------------------- local types ----------------------------- */
 
 export interface DateRange {
-  start?: string;
-  end?: string;
+  start?: string; // "YYYY-MM-DD" (UTC)
+  end?: string; // "YYYY-MM-DD" (UTC)
 }
 
 export interface AnalyticsData {
-  accounts: Account[];
-  selected: string[];
+  accounts: Account[]; // always an array
+  selected: string[]; // redisName[]
   setSelected: React.Dispatch<React.SetStateAction<string[]>>;
   range: DateRange;
   setRange: React.Dispatch<React.SetStateAction<DateRange>>;
@@ -21,47 +24,72 @@ export interface AnalyticsData {
   setEarliest: React.Dispatch<React.SetStateAction<boolean>>;
   loading: boolean;
   error: string | null;
-  rawJson: MultiMetricsResponse | null;
-  merged: MetricsPayload | null;
-  perAccounts?: Record<string, MetricsPayload>;
+  rawJson: HeavyResponse | null;
+  merged: MetricsSlim | null;
+  perAccounts?: Record<string, MetricsSlim>;
   onAutoFetch: () => Promise<void>;
 }
 
-/* ----------------------------- typed fetchers ----------------------------- */
-async function fetchAccounts(): Promise<Account[]> {
-  const res = await fetch("/api/accounts", { cache: "no-store" });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = (await res.json()) as Account[];
-  return Array.isArray(data) ? data.filter((a) => !!a?.redisName) : [];
+/* ----------------------------- safe helpers ---------------------------- */
+
+function isAccountLike(v: unknown): v is Account {
+  return (
+    !!v &&
+    typeof v === "object" &&
+    typeof (v as { redisName?: unknown }).redisName === "string"
+  );
 }
 
-async function fetchMetricsForSelected(
+function normalizeAccounts(v: unknown): Account[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter(isAccountLike);
+}
+
+/** Robust fetch that never throws; always returns an array. */
+async function fetchAccountsSafe(): Promise<Account[]> {
+  try {
+    const res = await fetch("/api/accounts", { cache: "no-store" });
+    if (!res.ok) {
+      console.error("[accounts] HTTP", res.status);
+      return [];
+    }
+    const data = (await res.json()) as unknown;
+    return normalizeAccounts(data);
+  } catch (e) {
+    console.error("[accounts] fetch failed:", e);
+    return [];
+  }
+}
+
+/** Heavy endpoint fetch. Throws on non-2xx. */
+async function fetchHeavy(
   accounts: string[],
   range: { start?: string; end?: string },
   earliest: boolean
-): Promise<MultiMetricsResponse> {
+): Promise<HeavyResponse> {
   const params = new URLSearchParams();
-  if (accounts.length > 0) params.set("accounts", accounts.join(","));
-  const hasExplicitRange = Boolean(range.start && range.end);
 
+  if (accounts.length > 0) params.set("accounts", accounts.join(","));
+
+  const hasExplicitRange = Boolean(range.start && range.end);
   if (hasExplicitRange) {
     params.set("startDate", range.start as string);
     params.set("endDate", range.end as string);
   } else if (earliest && range.end) {
     params.set("earliest", "true");
     params.set("endDate", range.end);
-  } else {
-    // nothing valid; caller should guard against this.
   }
 
-  const res = await fetch(`/api/v1/1-performance_metrics/metrics?${params.toString()}`, {
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-  return (await res.json()) as MultiMetricsResponse;
+  params.set("tz", Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
+
+  const url = `/api/v1/1-performance_metrics?${params.toString()}`;
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Heavy fetch ${res.status} ${res.statusText}`);
+  return (await res.json()) as HeavyResponse;
 }
 
-/* ----------------------------- headless logic ----------------------------- */
+/* ----------------------------- main hook ------------------------------- */
+
 export function useAnalyticsData(): AnalyticsData {
   const [range, setRange] = useState<DateRange>({});
   const [earliest, setEarliest] = useState<boolean>(false);
@@ -71,42 +99,45 @@ export function useAnalyticsData(): AnalyticsData {
 
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [rawJson, setRawJson] = useState<MultiMetricsResponse | null>(null);
+  const [rawJson, setRawJson] = useState<HeavyResponse | null>(null);
 
+  // bootstrap accounts + defaults (last 30d UTC)
   useEffect(() => {
     let alive = true;
+
     (async () => {
-      try {
-        const all = await fetchAccounts();
-        if (!alive) return;
-        setAccounts(all);
+      const all = await fetchAccountsSafe();
+      if (!alive) return;
 
-        const monitored = all
-          .filter((a) => a.monitored)
-          .map((a) => a.redisName);
-        setSelected(monitored);
+      setAccounts(all);
 
-        // default: last 30d
-        const end = new Date();
-        const start = new Date();
-        start.setDate(end.getDate() - 30);
-        setRange({
-          start: start.toISOString().slice(0, 10),
-          end: end.toISOString().slice(0, 10),
-        });
-        setEarliest(false);
-      } catch (e: unknown) {
-        if (!alive) return;
-        setError(e instanceof Error ? e.message : "Failed to load accounts");
-      }
-    })();
+      // Default selection = monitored accounts (if any)
+      const monitored = all
+        .filter((a) => Boolean(a?.monitored))
+        .map((a) => a.redisName);
+      setSelected(monitored);
+
+      // Default range = last 30 days (UTC)
+      const end = new Date();
+      const start = new Date(
+        Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate() - 30)
+      );
+      const toISO = (d: Date) => d.toISOString().slice(0, 10);
+      setRange({ start: toISO(start), end: toISO(end) });
+      setEarliest(false);
+    })().catch((e) => {
+      if (!alive) return;
+      console.error("[bootstrap] failed:", e);
+      setError(e instanceof Error ? e.message : "Failed to initialize");
+    });
+
     return () => {
       alive = false;
     };
   }, []);
 
   const onAutoFetch = useCallback(async (): Promise<void> => {
-    if (!selected.length) return;
+    if (selected.length === 0) return;
 
     const hasExplicitRange = Boolean(range.start && range.end);
     if (!hasExplicitRange && !(earliest && range.end)) return;
@@ -114,33 +145,32 @@ export function useAnalyticsData(): AnalyticsData {
     setLoading(true);
     setError(null);
     try {
-      // const data = generateDummyMetrics(selected, range, earliest);
-      const data = await fetchMetricsForSelected(selected, range, earliest);
+      const data = await fetchHeavy(selected, range, earliest);
       setRawJson(data);
+
+      // If backend supplies accounts, prefer that (keeps UI in sync)
+      if (Array.isArray(data.accounts) && data.accounts.length > 0) {
+        setAccounts(normalizeAccounts(data.accounts));
+      }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to build metrics");
+      const msg = e instanceof Error ? e.message : "Failed to build metrics";
+      console.error("[heavy] error:", msg);
+      setError(msg);
+      setRawJson(null);
     } finally {
       setLoading(false);
     }
   }, [selected, range, earliest]);
 
-  const merged = useMemo<MetricsPayload | null>(() => {
-    if (!rawJson) return null;
-    return isMultiSelectionResponse(rawJson) ? rawJson.merged : rawJson;
-  }, [rawJson]);
+  const merged = useMemo<MetricsSlim | null>(
+    () => (rawJson ? rawJson.merged : null),
+    [rawJson]
+  );
 
-  // normalize perAccounts even when a single payload is returned
-  const perAccounts = useMemo<
-    Record<string, MetricsPayload> | undefined
-  >(() => {
-    if (!rawJson) return undefined;
-    if (isMultiSelectionResponse(rawJson)) return rawJson.per_account;
-    // single
-    if (merged && selected.length === 1) {
-      return { [selected[0] as string]: merged };
-    }
-    return undefined;
-  }, [rawJson, merged, selected]);
+  const perAccounts = useMemo<Record<string, MetricsSlim> | undefined>(
+    () => (rawJson ? rawJson.per_account : undefined),
+    [rawJson]
+  );
 
   return {
     accounts,

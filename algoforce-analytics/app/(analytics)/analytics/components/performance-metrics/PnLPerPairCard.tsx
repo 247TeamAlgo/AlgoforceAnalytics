@@ -1,3 +1,4 @@
+// app/(analytics)/analytics/components/performance-metrics/PnLPerPairCard.tsx
 "use client";
 
 import * as React from "react";
@@ -23,13 +24,7 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import type { MetricsPayload, HistoricalBucket } from "../../lib/types";
+import type { MetricsSlim } from "../../lib/types";
 import { fmtUsd } from "../../lib/types";
 
 type Row = { label: string; total: number };
@@ -51,14 +46,11 @@ const chartConfig: ChartConfig = {
   neg: { label: "Loss", color: NEG_HEX },
 };
 
-function build(merged: MetricsPayload, topN = 12): Row[] {
-  const buckets: HistoricalBucket[] | undefined = merged.historical?.perPair;
-  if (!buckets?.length) return [];
+function build(merged: MetricsSlim, topN = 12): Row[] {
+  const buckets = merged.pnl_per_pair ?? [];
+  if (!buckets.length) return [];
   return [...buckets]
-    .map((b) => ({
-      label: b.label,
-      total: Number((b.pnl_pos + b.pnl_neg).toFixed(2)),
-    }))
+    .map((b) => ({ label: b.label, total: Number(b.total.toFixed(2)) }))
     .sort((a, b) => Math.abs(b.total) - Math.abs(a.total))
     .slice(0, topN);
 }
@@ -80,26 +72,6 @@ function maxAbsDomain(rows: DivergingRow[]): [number, number] {
   }
   m = Math.ceil(m * 1.1); // small headroom
   return [-m, m];
-}
-
-/** Resize observer hook (no layout thrash, works in cards) */
-function useMeasure<T extends HTMLElement>(): [
-  React.MutableRefObject<T | null>,
-  { width: number; height: number },
-] {
-  const ref = React.useRef<T>(null);
-  const [size, setSize] = React.useState({ width: 0, height: 0 });
-  React.useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const ro = new ResizeObserver((entries) => {
-      const cr = entries[0]?.contentRect;
-      if (cr) setSize({ width: cr.width, height: cr.height });
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  return [ref, size];
 }
 
 /** Labels just outside the bar ends; left for negatives, right for positives */
@@ -124,7 +96,27 @@ function DivergingValueLabel(raw: unknown) {
   );
 }
 
-export default function PnLPerPairCard({ merged }: { merged: MetricsPayload }) {
+/** Resize observer hook (no layout thrash, works in cards) */
+function useMeasure<T extends HTMLElement>(): [
+  React.MutableRefObject<T | null>,
+  { width: number; height: number },
+] {
+  const ref = React.useRef<T>(null);
+  const [size, setSize] = React.useState({ width: 0, height: 0 });
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const cr = entries[0]?.contentRect;
+      if (cr) setSize({ width: cr.width, height: cr.height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, size];
+}
+
+export default function PnLPerPairCard({ merged }: { merged: MetricsSlim }) {
   const rows = React.useMemo(() => build(merged), [merged]);
   const data = React.useMemo(() => toDiverging(rows), [rows]);
   const domain = React.useMemo(() => maxAbsDomain(data), [data]);
@@ -132,7 +124,7 @@ export default function PnLPerPairCard({ merged }: { merged: MetricsPayload }) {
   const [contentRef, { width }] = useMeasure<HTMLDivElement>();
   const count = Math.max(1, data.length);
 
-  // Sizing + responsiveness copied from CombinedDrawdownCard
+  // Sizing + responsiveness mirrors Drawdown card
   const widthFactor =
     width < 520 ? 0.96 : width < 800 ? 1.06 : width < 1100 ? 1.18 : 1.3;
 
@@ -140,14 +132,14 @@ export default function PnLPerPairCard({ merged }: { merged: MetricsPayload }) {
     count <= 6
       ? 32
       : count <= 10
-      ? 28
-      : count <= 16
-      ? 24
-      : count <= 24
-      ? 20
-      : count <= 32
-      ? 18
-      : 16;
+        ? 28
+        : count <= 16
+          ? 24
+          : count <= 24
+            ? 20
+            : count <= 32
+              ? 18
+              : 16;
 
   const barSize = Math.max(12, Math.min(40, Math.round(baseBar * widthFactor)));
   const gapY = Math.round(barSize * 0.38);
@@ -176,49 +168,14 @@ export default function PnLPerPairCard({ merged }: { merged: MetricsPayload }) {
         <div className="px-6 pt-4 pb-2 sm:py-3">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <CardTitle className="leading-tight">Total PnL per Pair</CardTitle>
+              <CardTitle className="leading-tight">
+                Total PnL per Pair
+              </CardTitle>
               <CardDescription className="mt-0.5">
                 Zero-centered; losses left (red), profits right (green)
               </CardDescription>
             </div>
           </div>
-
-          {/* Toolbar legend pills */}
-          <TooltipProvider>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs cursor-default">
-                    <span
-                      aria-hidden
-                      className="h-2.5 w-2.5 rounded-[3px]"
-                      style={{ backgroundColor: POS_HEX }}
-                    />
-                    <span className="text-muted-foreground">Profit</span>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent className="text-xs">
-                  Positive total PnL extends to the right from zero.
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs cursor-default">
-                    <span
-                      aria-hidden
-                      className="h-2.5 w-2.5 rounded-[3px]"
-                      style={{ backgroundColor: NEG_HEX }}
-                    />
-                    <span className="text-muted-foreground">Loss</span>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent className="text-xs">
-                  Negative total PnL extends to the left from zero.
-                </TooltipContent>
-              </Tooltip>
-            </div>
-          </TooltipProvider>
         </div>
       </CardHeader>
 

@@ -1,3 +1,4 @@
+// app/(analytics)/analytics/components/performance-metrics/ReturnsCard.tsx
 "use client";
 
 import * as React from "react";
@@ -15,7 +16,7 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
-import type { MetricsPayload } from "../../lib/types";
+import type { MetricsSlim } from "../../lib/types";
 
 type Row = { day: string; cum: number };
 
@@ -23,8 +24,8 @@ const chartConfig: ChartConfig = {
   cum: { label: "Cumulative Net", color: "var(--chart-1)" },
 };
 
-function buildCum(merged: MetricsPayload): Row[] {
-  const rows = merged.daily_return_last_n_days.daily_rows;
+function buildCum(merged: MetricsSlim): Row[] {
+  const rows = merged.daily;
   let cum = 0;
   return rows.map((r) => {
     cum += r.net_pnl;
@@ -32,12 +33,8 @@ function buildCum(merged: MetricsPayload): Row[] {
   });
 }
 
-export default function ReturnsCard({
-  merged,
-}: {
-  merged: MetricsPayload;
-}) {
-  const kpi = merged.daily_return_last_n_days.total_return_pct_over_window ?? 0;
+export default function ReturnsCard({ merged }: { merged: MetricsSlim }) {
+  const kpi = merged.total_return_pct_over_window ?? 0;
   const data = React.useMemo(() => buildCum(merged), [merged]);
 
   return (
