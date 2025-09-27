@@ -1,7 +1,7 @@
 // app/api/v1/1-performance_metrics/metrics/route.ts
 import { NextResponse } from "next/server";
 import { readAccounts } from "@/lib/jsonStore";
-import { computeSelectedMetrics } from "../calculators/z_math_helpers";
+import { computeSelectedMetrics } from "../../1-performance_metrics/calculators/z_math_helpers";
 import type { MetricConfig } from "./types";
 
 export const runtime = "nodejs";
