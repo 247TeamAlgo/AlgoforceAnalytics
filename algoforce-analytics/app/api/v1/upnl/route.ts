@@ -7,6 +7,7 @@ import {
 import {
   loadUpnlSum,
   loadUpnlPerSymbolMap,
+  loadUpnlPerPairMap,
 } from "@/app/api/v1/1-performance_metrics/calculators/redis_parsers";
 
 type UpnlResponse = {
@@ -15,6 +16,8 @@ type UpnlResponse = {
   per_account_upnl: Record<string, number>;
   /** Optional live per-symbol breakdown per account. */
   per_account_symbol_upnl?: Record<string, Record<string, number>>;
+  /** Optional live per-pair breakdown per account. */
+  per_account_pair_upnl?: Record<string, Record<string, number>>;
   base_snapshot_id?: string;
   accounts: string[];
 };
@@ -58,6 +61,7 @@ export async function GET(req: Request): Promise<Response> {
 
     const per_account_upnl: Record<string, number> = {};
     const per_account_symbol_upnl: Record<string, Record<string, number>> = {};
+    const per_account_pair_upnl: Record<string, Record<string, number>> = {};
 
     await Promise.all(
       accounts.map(async (acc) => {
@@ -66,6 +70,9 @@ export async function GET(req: Request): Promise<Response> {
 
         if (includeBreakdown) {
           per_account_symbol_upnl[acc] = await loadUpnlPerSymbolMap(r, acc);
+          per_account_pair_upnl[acc] = await loadUpnlPerPairMap(r, acc, {
+            canonicalize: true,
+          });
         }
       })
     );
@@ -83,6 +90,7 @@ export async function GET(req: Request): Promise<Response> {
       base_snapshot_id,
       accounts,
       ...(includeBreakdown ? { per_account_symbol_upnl } : {}),
+      ...(includeBreakdown ? { per_account_pair_upnl } : {}),
     };
 
     const res = NextResponse.json(body, { status: 200 });

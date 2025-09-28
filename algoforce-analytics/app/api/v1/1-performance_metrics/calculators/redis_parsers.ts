@@ -370,6 +370,77 @@ export function extractTradesheetPairs(payload: unknown): PairMap {
   return map;
 }
 
+/** Build a rich index from `${redisName}_tradesheet` for pair attribution. */
+export async function loadTradesheetIndex(
+  r: Redis,
+  redisName: string
+): Promise<{ index: TSIndexRow[]; orderToPair: Map<string, string> }> {
+  const payload = await redisGetJSON(r, `${redisName}_tradesheet`);
+
+  // Normalize rows from various shapes:
+  const rows: TradesheetRow[] = (() => {
+    if (Array.isArray(payload)) return payload as TradesheetRow[];
+    if (payload && typeof payload === "object") {
+      const obj = payload as RedisArrayContainer & DictLike;
+      if (Array.isArray(obj.rows)) return obj.rows as TradesheetRow[];
+      if (Array.isArray(obj.data)) return obj.data as TradesheetRow[];
+      if ((obj as DictLike)["tradeslist"] && Array.isArray((obj as DictLike)["tradeslist"])) {
+        return ((obj as DictLike)["tradeslist"] as unknown[]) as TradesheetRow[];
+      }
+      // keyed object -> values
+      return Object.values(obj) as TradesheetRow[];
+    }
+    if (typeof payload === "string" && payload.includes(",")) {
+      return parseCsvLoose(payload) as unknown as TradesheetRow[];
+    }
+    return [];
+  })();
+
+  const index: TSIndexRow[] = [];
+  const orderToPair = new Map<string, string>();
+
+  for (const r0 of rows) {
+    const pairRaw = (r0.pair ?? (r0 as DictLike)?.["PAIR"]) as string | undefined;
+    const pair = (pairRaw || "").toUpperCase().trim();
+    if (!pair) continue;
+
+    const { sym0, sym1 } = parsePairSymbols(pair);
+
+    const q0 = num(r0.qty_0);
+    const q1 = num(r0.qty_1);
+    const sign0 = q0 > 0 ? 1 : q0 < 0 ? -1 : 0;
+    const sign1 = q1 > 0 ? 1 : q1 < 0 ? -1 : 0;
+
+    const entryMs = toMsOrNull(r0.entry_dt);
+    const exitMs = toMsOrNull((r0 as DictLike)["exit_dt"]);
+
+    const entryOrders: string[] = [];
+    const exitOrders: string[] = [];
+
+    for (const k of ["entry_order_0", "entry_order_1"] as const) {
+      const v = r0[k];
+      if (v !== undefined && v !== null && String(v).trim().length > 0) {
+        const s = String(v).trim();
+        entryOrders.push(s);
+        orderToPair.set(s, pair);
+      }
+    }
+    for (const k of ["exit_order_0", "exit_order_1"] as const) {
+      const v = r0[k];
+      if (v !== undefined && v !== null && String(v).trim().length > 0) {
+        const s = String(v).trim();
+        exitOrders.push(s);
+        orderToPair.set(s, pair);
+      }
+    }
+
+    index.push({ pair, sym0, sym1, sign0: sign0 as 1 | -1 | 0, sign1: sign1 as 1 | -1 | 0, entryMs, exitMs, entryOrders, exitOrders });
+  }
+
+  return { index, orderToPair };
+}
+
+
 export async function loadTradesheetPairMap(
   r: Redis,
   redisName: string
@@ -377,3 +448,172 @@ export async function loadTradesheetPairMap(
   const data = await redisGetJSON(r, `${redisName}_tradesheet`);
   return extractTradesheetPairs(data);
 }
+
+/* --- local, non-conflicting helpers (do NOT reuse global names) --- */
+const _nUP: (v: unknown) => number = (v) => {
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  if (typeof v === "string") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+};
+
+const _ucUP = (x: unknown): string =>
+  typeof x === "string" ? x.toUpperCase() : "";
+
+const _coercePyishUP = (raw: string): unknown | null => {
+  if (!/[{[]/.test(raw)) return null;
+  let s = raw.trim();
+  s = s.replace(/'/g, '"').replace(/\bFalse\b/g, "false").replace(/\bTrue\b/g, "true").replace(/\bNone\b/g, "null");
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+};
+
+const _getJSONIfPossibleUP = async (r: Redis, key: string): Promise<unknown | null> => {
+  const raw = await r.get(key);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const coerced = _coercePyishUP(raw);
+    return coerced ?? null;
+  }
+};
+
+const _canonicalPairUP = (pair: string): string => {
+  const p = _ucUP(pair);
+  const i = p.indexOf("_");
+  if (i < 0) return p;
+  const a = p.slice(0, i).trim();
+  const b = p.slice(i + 1).trim();
+  if (!a || !b) return p;
+  return [a, b].sort().join("_");
+};
+
+/** Minimal shape for {account}_db entries we care about. */
+type _DbEntryUP = {
+  pair?: string;
+  entry_price_0?: number | string | null;
+  entry_price_1?: number | string | null;
+  qty_0?: number | string | null;  // signed
+  qty_1?: number | string | null;  // signed
+};
+
+/** Minimal shape for {account}_zpnl entries we care about. */
+type _ZpnlEntryUP = { pnl?: number | string; z_score?: number | string };
+
+/**
+ * Build per-pair live UPNL (USD) from Redis:
+ *   - reads `${redisName}_db` (open positions snapshot)
+ *   - reads `${redisName}_zpnl` (fractional pnl by pairKey or pair label)
+ *   - dollar_upnl = frac_pnl * (|entry_price_0*qty_0| + |entry_price_1*qty_1|)
+ * Label prefers `e.pair` (human-readable); fallback to the db key.
+ * If opts.canonicalize is true, merges reversed legs (alphabetical order).
+ */
+export async function loadUpnlPerPairMap(
+  r: Redis,
+  redisName: string,
+  opts?: { canonicalize?: boolean }
+): Promise<Record<string, number>> {
+  const canonicalize = !!opts?.canonicalize;
+
+  const [dbPayload, zpPayload] = await Promise.all([
+    _getJSONIfPossibleUP(r, `${redisName}`),
+    _getJSONIfPossibleUP(r, `${redisName}_zpnl`),
+  ]);
+  if (!dbPayload || !zpPayload) return {};
+
+  const dbObj: Record<string, _DbEntryUP> =
+    typeof dbPayload === "object" && dbPayload !== null && !Array.isArray(dbPayload)
+      ? (dbPayload as Record<string, _DbEntryUP>)
+      : {};
+
+  const zpObj: Record<string, _ZpnlEntryUP> =
+    typeof zpPayload === "object" && zpPayload !== null && !Array.isArray(zpPayload)
+      ? (zpPayload as Record<string, _ZpnlEntryUP>)
+      : {};
+
+  const agg = new Map<string, number>();
+
+  for (const [pairKey, eRaw] of Object.entries(dbObj)) {
+    const e = eRaw || ({} as _DbEntryUP);
+
+    // Prefer human label from entry; fallback to the db key.
+    const rawLabel = (e.pair && _ucUP(e.pair)) || _ucUP(pairKey);
+    const label = canonicalize ? _canonicalPairUP(rawLabel) : rawLabel;
+
+    const posSize =
+      Math.abs(_nUP(e.entry_price_0) * _nUP(e.qty_0)) +
+      Math.abs(_nUP(e.entry_price_1) * _nUP(e.qty_1));
+
+    if (!(posSize > 0)) continue;
+
+    // Fractional pnl: prefer zpnl[pairKey], then zpnl[e.pair] if present
+    const frac =
+      _nUP(zpObj[pairKey]?.pnl) ||
+      (e.pair ? _nUP(zpObj[_ucUP(e.pair)]?.pnl) : 0);
+
+    if (!frac) continue;
+
+    const dollar = frac * posSize;
+    agg.set(label, (agg.get(label) ?? 0) + dollar);
+  }
+
+  // Return as object, sorted by absolute magnitude
+  const out: Record<string, number> = {};
+  Array.from(agg.entries())
+    .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+    .forEach(([k, v]) => {
+      out[k] = Number(v.toFixed(8));
+    });
+  return out;
+}
+
+/**
+ * Try multiple candidate names (redisName, binanceName, etc.) and return
+ * the first non-empty per-pair UPNL map.
+ */
+export async function loadUpnlPerPairMapMulti(
+  r: Redis,
+  redisNames: string[],
+  opts?: { canonicalize?: boolean }
+): Promise<Record<string, number>> {
+  for (const name of redisNames) {
+    const m = await loadUpnlPerPairMap(r, name, opts);
+    if (Object.keys(m).length > 0) return m;
+  }
+  return {};
+}
+
+// ---- Pair/Tradesheet indexing for orderId → pair attribution ----
+export type TSIndexRow = {
+  pair: string;              // "AAAUSDT_BBBUSDT"
+  sym0: string;              // "AAAUSDT"
+  sym1: string;              // "BBBUSDT"
+  sign0: 1 | -1 | 0;         // from qty_0 (+ long / - short)
+  sign1: 1 | -1 | 0;         // from qty_1
+  entryMs: number | null;    // ms since epoch
+  exitMs: number | null;     // ms since epoch
+  entryOrders: string[];     // [entry_order_0, entry_order_1] (present ones)
+  exitOrders: string[];      // [exit_order_0, exit_order_1] (present ones)
+};
+
+function toMsOrNull(dt: unknown): number | null {
+  if (!dt) return null;
+  try {
+    const t = new Date(String(dt)).getTime();
+    return Number.isFinite(t) ? t : null;
+  } catch {
+    return null;
+  }
+}
+
+function parsePairSymbols(pair: string): { sym0: string; sym1: string } {
+  const [a, b] = (pair || "").toUpperCase().split("_");
+  return { sym0: a || "", sym1: b || "" };
+}
+

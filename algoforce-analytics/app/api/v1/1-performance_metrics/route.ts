@@ -19,8 +19,9 @@ import {
 
 import {
   loadTradesheetPairMap,
+  loadTradesheetIndex, // ← NEW
   loadUpnlSum,
-  loadUpnlPerSymbolMap, // ← added
+  loadUpnlPerSymbolMap,
   type PairMap,
 } from "./calculators/redis_parsers";
 
@@ -29,6 +30,7 @@ import {
   drawdownMagnitude,
   equityFromDaily,
 } from "./calculators/series_builders";
+
 import {
   ISODate,
   MetricsSlim,
@@ -166,34 +168,150 @@ function bucketsFrom<K extends string>(
   return out;
 }
 
+function bucketsFromPairs(items: PairBucket[]): Bucket[] {
+  type Agg = {
+    total: number;
+    reasons: Set<string>;
+    unmapped: boolean;
+    orderIds: Set<string>;
+  };
+  const m = new Map<string, Agg>();
+
+  for (const it of items) {
+    const key = it.label; // either PAIR or "[UNMAPPED] SYM"
+    const agg = m.get(key) ?? {
+      total: 0,
+      reasons: new Set<string>(),
+      unmapped: false,
+      orderIds: new Set<string>(),
+    };
+
+    agg.total += it.total;
+
+    if (it.source === "unmapped") {
+      agg.unmapped = true;
+      if (it.reason) agg.reasons.add(it.reason);
+      if (it.orderId) agg.orderIds.add(it.orderId);
+    }
+
+    m.set(key, agg);
+  }
+
+  const out: Bucket[] = [];
+  for (const [label, agg] of m.entries()) {
+    let finalLabel = label;
+
+    if (agg.unmapped) {
+      const reasons = Array.from(agg.reasons);
+      const reasonStr = reasons.length ? reasons.join(" | ") : "unknown";
+
+      // include up to 5 orderIds, then ellipsis if more
+      const ids = Array.from(agg.orderIds).slice(0, 5);
+      const more = agg.orderIds.size > 5 ? "…" : "";
+      const idsStr = ids.length ? `; orderIds: ${ids.join(",")}${more}` : "";
+
+      finalLabel = `${label} — reason: ${reasonStr}${idsStr}`;
+    }
+
+    out.push({ label: finalLabel, total: Number(agg.total.toFixed(2)) });
+  }
+
+  out.sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
+  return out;
+}
+
+
+type PairBucket = {
+  label: string;
+  total: number;
+  mapped: boolean;
+  source: "direct" | "fuzzy" | "unmapped";
+  reason?: string;   // for unmapped
+  orderId?: string;  // ← NEW: keep per-fill orderId so we can summarize later
+};
+
+
+type TSIndex = Awaited<ReturnType<typeof loadTradesheetIndex>>["index"];
+
+/** Pick closest tradesheet row by symbol + side sign + time proximity. */
+function matchPairByTimeAndSide(
+  sym: string,
+  sideRaw: string | undefined,
+  tsMs: number,
+  idx: TSIndex,
+  toleranceMs = 60_000
+): string | null {
+  if (!sym) return null;
+
+  // BUY -> +1, SELL -> -1 (fallback 0)
+  const sNorm = (sideRaw || "").toUpperCase();
+  const sideSign = sNorm === "BUY" ? 1 : sNorm === "SELL" ? -1 : 0;
+
+  let best: { pair: string; dt: number } | null = null;
+
+  for (const row of idx) {
+    let legSign = 0;
+    if (sym === row.sym0) legSign = row.sign0;
+    else if (sym === row.sym1) legSign = row.sign1;
+    else continue;
+
+    if (sideSign !== 0 && legSign !== 0 && sideSign !== legSign) {
+      // side doesn't match leg direction (optional; remove if too strict)
+      continue;
+    }
+
+    // distance to entry or exit (whichever closer, if present)
+    const candidates: number[] = [];
+    if (row.entryMs != null) candidates.push(Math.abs(tsMs - row.entryMs));
+    if (row.exitMs != null) candidates.push(Math.abs(tsMs - row.exitMs));
+    if (!candidates.length) continue;
+
+    const dist = Math.min(...candidates);
+    if (dist <= toleranceMs && (!best || dist < best.dt)) {
+      best = { pair: row.pair, dt: dist };
+    }
+  }
+
+  return best ? best.pair : null;
+}
+
 /**
  * Per-day sums and bucket items.
  */
 function groupDailyAndBuckets(
   trades: TradeRow[],
-  pairMap: PairMap,
+  orderToPair: PairMap,
+  tsIndex: TSIndex,
   dayStartHour: Hour0to23
 ): {
   byDay: Map<string, { gross: number; fees: number; net: number }>;
   perSymbolItems: Array<{ label: string; total: number }>;
-  perPairItems: Array<{ label: string; total: number }>;
+  perPairItems: PairBucket[]; // rich items; we'll aggregate later
 } {
   const byDay = new Map<string, { gross: number; fees: number; net: number }>();
   const perSymbolItems: Array<{ label: string; total: number }> = [];
-  const perPairItems: Array<{ label: string; total: number }> = [];
+  const perPairItems: PairBucket[] = [];
+
+  // quick set of symbols present in tradesheet index
+  const tsSymbols = new Set<string>();
+  for (const row of tsIndex) {
+    if (row.sym0) tsSymbols.add(row.sym0);
+    if (row.sym1) tsSymbols.add(row.sym1);
+  }
 
   for (const t of trades) {
-    const realized = num(t.realizedPnl);
-    const fees = num(t.commission);
+    const realized = num((t as { realizedPnl?: unknown }).realizedPnl);
+    const fees = num((t as { commission?: unknown }).commission);
     const net = realized - fees;
 
-    const ts = String(t.time ?? "");
+    const ts = String((t as { time?: unknown }).time ?? "");
     if (!ts) continue;
-
     const day = isoDayFromLocalDatetime(ts, dayStartHour);
 
-    const sym = (t.symbol ?? "").toString().toUpperCase();
-    const oid = (t.orderId ?? "").toString();
+    const sym = ((t as { symbol?: unknown }).symbol ?? "").toString().toUpperCase();
+    const oid = ((t as { orderId?: unknown }).orderId ?? "").toString();
+    const side = ((t as { side?: unknown }).side ?? "").toString();
+    const ms = new Date(ts.replace(" ", "T") + "Z").getTime();
 
     const cur = byDay.get(day) ?? { gross: 0, fees: 0, net: 0 };
     cur.gross += realized;
@@ -203,12 +321,46 @@ function groupDailyAndBuckets(
 
     if (sym) perSymbolItems.push({ label: sym, total: net });
 
-    const pair = pairMap.get(oid) || sym || "UNMAPPED";
-    perPairItems.push({ label: pair, total: net });
+    // 1) primary mapping via orderId
+    let pair = (oid && orderToPair.get(oid)) || "";
+
+    // 2) fallback fuzzy match
+    let source: "direct" | "fuzzy" | "unmapped" = "unmapped";
+    let reason: string | undefined;
+
+    if (pair) {
+      source = "direct";
+    } else {
+      const fuzzy = matchPairByTimeAndSide(sym, side, Number.isFinite(ms) ? ms : 0, tsIndex, 60_000);
+      if (fuzzy) {
+        pair = fuzzy;
+        source = "fuzzy";
+      } else {
+        source = "unmapped";
+        const reasons: string[] = [];
+        if (!oid || !orderToPair.has(oid)) reasons.push("orderId not in tradesheet");
+        if (!Number.isFinite(ms)) reasons.push("invalid timestamp");
+        if (!side) reasons.push("missing side");
+        if (!sym) reasons.push("missing symbol");
+        else if (!tsSymbols.has(sym)) reasons.push("symbol not in tradesheet window");
+        if (reasons.length === 0) reasons.push("no entry/exit within ±60s");
+        reason = reasons.join("; ");
+      }
+    }
+
+    perPairItems.push({
+      label: pair ? pair : `[UNMAPPED] ${sym || "UNKNOWN"}`,
+      total: net,
+      mapped: !!pair,
+      source,
+      reason,
+      orderId: oid || undefined,   // ← keep the orderId so we can show it later
+    });
   }
 
   return { byDay, perSymbolItems, perPairItems };
 }
+
 
 async function earliestStartAcrossAccounts(
   endIso: ISODate,
@@ -259,6 +411,227 @@ function recomputeFromDaily(
   return { drawdown_mag, streaks, total_return_pct_over_window };
 }
 
+/* ───────────────────── pair resolver: SQL fills ⇄ tradesheet rows ───────────────────── */
+
+type TSRow = {
+  pair: string;
+  entry_dt?: string | null;
+  exit_dt?: string | null; // ← NEW
+  qty_0?: number | string | null;
+  qty_1?: number | string | null;
+  entry_order_0?: string | number | null;
+  entry_order_1?: string | number | null;
+  exit_order_0?: string | number | null; // ← NEW
+  exit_order_1?: string | number | null; // ← NEW
+};
+
+function splitPairSymbols(pair: string): [string, string] {
+  const [a, b] = (pair || "").split("_");
+  return [(a || "").toUpperCase(), (b || "").toUpperCase()];
+}
+function sideForQty(q: number): "BUY" | "SELL" {
+  return q >= 0 ? "BUY" : "SELL";
+}
+function parseISOorLike(s: string | null | undefined): number | null {
+  if (!s) return null;
+  const t = Date.parse(s);
+  return Number.isFinite(t) ? t : null;
+}
+function toNumStrict(x: unknown): number {
+  if (typeof x === "number") return Number.isFinite(x) ? x : 0;
+  if (typeof x === "string") {
+    const n = Number(x);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
+/** Safe read of trade side; tolerates different casing/keys. Defaults to BUY. */
+function readSideFromTrade(tr: TradeRow): "BUY" | "SELL" {
+  const raw =
+    (tr as unknown as Record<string, unknown>)?.side ??
+    (tr as unknown as Record<string, unknown>)?.Side ??
+    (tr as unknown as Record<string, unknown>)?.orderSide ??
+    (tr as unknown as Record<string, unknown>)?.SIDE ??
+    "";
+  const s = String(raw || "").toUpperCase();
+  return s === "SELL" ? "SELL" : "BUY";
+}
+
+/** Safe read of trade quantity; tolerates different column names. */
+function readQtyFromTrade(tr: TradeRow): number {
+  const k = tr as unknown as Record<string, unknown>;
+  return toNumStrict(
+    k.qty ??
+      k.executedQty ??
+      k.execQty ??
+      k.quantity ??
+      k.Qty ??
+      k.baseQty ??
+      k.baseQuantity
+  );
+}
+
+/** Load tradesheet rows from `${redisName}_tradesheet` supporting multiple shapes. */
+async function loadTradesheetRows(
+  r: ReturnType<typeof getRedis>,
+  redisName: string
+): Promise<TSRow[]> {
+  const raw = await r.get(`${redisName}_tradesheet`);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw as string);
+    if (Array.isArray(parsed?.tradeslist)) return parsed.tradeslist as TSRow[];
+    if (Array.isArray(parsed)) return parsed as TSRow[];
+    if (parsed && typeof parsed === "object") {
+      return Object.values(parsed) as TSRow[];
+    }
+  } catch {
+    /* ignore parse errors -> empty */
+  }
+  return [];
+}
+
+/**
+ * Start from tradesheet’s direct orderId->pair (entry_order_*)
+ * and AUGMENT with a fuzzy matcher so chunked fills (different orderIds)
+ * near entry_dt are also mapped to the same pair.
+ */
+function buildAugmentedOrderIdToPair(
+  sqlTrades: TradeRow[],
+  tsRows: TSRow[],
+  opts?: {
+    windowSec?: number; // +/- time window around entry_dt (default 10s)
+    gapSec?: number; // max gap between chained fills when walking back (default 2s)
+    qtyTolPct?: number; // tolerance between chained sum(qty) and target abs(qty) (default 5%)
+  }
+): Map<string, string> {
+  const windowMs = Math.max(1, Math.trunc((opts?.windowSec ?? 10) * 1000));
+  const gapMs = Math.max(0, Math.trunc((opts?.gapSec ?? 2) * 1000));
+  const qtyTol = Math.max(0, Number(opts?.qtyTolPct ?? 0.05));
+
+  const map = new Map<string, string>(); // orderId -> PAIR(UPPER)
+
+  // 1) direct mapping from tradesheet entry order ids
+  for (const r of tsRows) {
+    const pairU = (r.pair || "").toUpperCase();
+    if (!pairU) continue;
+    for (const key of [
+      "entry_order_0",
+      "entry_order_1",
+      "exit_order_0",
+      "exit_order_1",
+    ] as const) {
+      const v = r[key];
+      if (v !== null && v !== undefined && String(v).length) {
+        map.set(String(v), pairU);
+      }
+    }
+  }
+
+  // 2) index SQL fills by symbol+side, sorted by time
+  type Fill = {
+    idx: number;
+    timeMs: number;
+    side: "BUY" | "SELL";
+    symbol: string;
+    orderId: string;
+    qty: number;
+  };
+  const bySymSide = new Map<string, Fill[]>();
+  for (let i = 0; i < sqlTrades.length; i += 1) {
+    const t = sqlTrades[i]!;
+    const symbol = String(
+      (t as unknown as Record<string, unknown>)?.symbol || ""
+    ).toUpperCase();
+    const side = readSideFromTrade(t);
+    const timeMs =
+      parseISOorLike(String((t as unknown as Record<string, unknown>)?.time)) ??
+      NaN;
+    const orderId = String(
+      (t as unknown as Record<string, unknown>)?.orderId ?? ""
+    );
+    const qty = readQtyFromTrade(t);
+    if (!symbol || !Number.isFinite(timeMs) || !orderId) continue;
+    const key = `${symbol}|${side}`;
+    const arr = bySymSide.get(key) ?? [];
+    arr.push({ idx: i, timeMs, side, symbol, orderId, qty });
+    bySymSide.set(key, arr);
+  }
+
+  for (const arr of bySymSide.values()) arr.sort((a, b) => a.timeMs - b.timeMs);
+
+  // helper: chain fills backwards from an anchor until qty target is (roughly) met
+  function collectBackwards(
+    arr: Fill[],
+    startIdx: number,
+    targetQtyAbs: number
+  ): Fill[] {
+    const out: Fill[] = [];
+    let acc = 0;
+    let lastMs = arr[startIdx]!.timeMs;
+    for (let k = startIdx; k >= 0; k -= 1) {
+      const f = arr[k]!;
+      if (lastMs - f.timeMs > gapMs) break; // too big a gap
+      out.push(f);
+      acc += Math.abs(f.qty);
+      lastMs = f.timeMs;
+      if (acc >= targetQtyAbs * (1 - qtyTol)) break; // “good enough”
+    }
+    return out;
+  }
+
+  // 3) augment with fuzzy matches from each tradesheet leg
+  for (const ts of tsRows) {
+    const pairU = (ts.pair || "").toUpperCase();
+    if (!pairU) continue;
+
+    const entryMsNum = parseISOorLike(ts.entry_dt);
+    const exitMsNum = parseISOorLike(ts.exit_dt);
+
+    // Use any available anchors (entry and/or exit)
+    const anchors = [entryMsNum, exitMsNum].filter(
+      (x): x is number => x != null
+    );
+    if (anchors.length === 0) continue;
+
+    const [s0, s1] = splitPairSymbols(ts.pair || "");
+    const q0 = toNumStrict(ts.qty_0);
+    const q1 = toNumStrict(ts.qty_1);
+
+    const legs: Array<{ sym: string; side: "BUY" | "SELL"; qtyAbs: number }> =
+      [];
+    if (s0 && q0)
+      legs.push({ sym: s0, side: sideForQty(q0), qtyAbs: Math.abs(q0) });
+    if (s1 && q1)
+      legs.push({ sym: s1, side: sideForQty(q1), qtyAbs: Math.abs(q1) });
+
+    for (const leg of legs) {
+      const key = `${leg.sym}|${leg.side}`;
+      const arr = bySymSide.get(key);
+      if (!arr || arr.length === 0) continue;
+
+      for (const anchorMs of anchors) {
+        // find the latest fill within [anchorMs - windowMs, anchorMs + windowMs]
+        let anchorIdx = -1;
+        for (let i = arr.length - 1; i >= 0; i -= 1) {
+          const dt = arr[i]!.timeMs;
+          if (dt >= anchorMs - windowMs && dt <= anchorMs + windowMs) {
+            anchorIdx = i;
+            break;
+          }
+          if (dt < anchorMs - windowMs) break;
+        }
+        if (anchorIdx < 0) continue;
+
+        const chain = collectBackwards(arr, anchorIdx, leg.qtyAbs);
+        for (const f of chain) map.set(f.orderId, pairU);
+      }
+    }
+  }
+
+  return map;
+}
+
 /* ------------------------ core builder (inline) ------------------------- */
 async function buildAccountMetrics(
   info: AccountInfo,
@@ -284,6 +657,7 @@ async function buildAccountMetrics(
   const startTs = `${startIso} 00:00:00`;
   const endTs = `${endIso} 23:59:59`;
 
+  // 1) SQL trades within date range
   const trades = await selectFromFirstExistingTable(
     pool,
     tableCandidates,
@@ -291,12 +665,30 @@ async function buildAccountMetrics(
     endTs
   );
 
-  const pairMap = await loadTradesheetPairMap(r, info.redisName);
+  // 2) Load tradesheet rows (for pair, entry_dt, qtys, entry_order_* etc.)
+  const tsRows = await loadTradesheetRows(r, info.redisName);
+
+  // 3) Start from direct orderId->pair map (entry_order_*) and augment with fuzzy time/qty matching
+  const directMap = await loadTradesheetPairMap(r, info.redisName);
+  const augmentedMap = buildAugmentedOrderIdToPair(trades, tsRows, {
+    windowSec: 10, // +/- 10 seconds around entry_dt
+    gapSec: 2, // chain contiguous fills with gaps <= 2 seconds
+    qtyTolPct: 0.05, // accept within 5% of target abs(qty)
+  });
+  // ensure direct matches stay (or overwrite fuzzy, if present)
+  for (const [k, v] of directMap.entries()) augmentedMap.set(k, v);
+
+  // 4) Optional UPNL goes only to last day equity (not into realized buckets)
   const upnl = includeUpnlOnEnd ? await loadUpnlSum(r, info.redisName) : 0;
+  const { index: tsIndex, orderToPair } = await loadTradesheetIndex(
+    r,
+    info.redisName
+  );
 
   const { byDay, perSymbolItems, perPairItems } = groupDailyAndBuckets(
     trades,
-    pairMap,
+    orderToPair,
+    tsIndex,
     dayStartHour
   );
 
@@ -312,8 +704,8 @@ async function buildAccountMetrics(
     drawdown_mag,
     streaks,
     daily,
-    pnl_per_symbol: bucketsFrom(perSymbolItems), // REALIZED only (Python parity)
-    pnl_per_pair: bucketsFrom(perPairItems), // REALIZED only
+    pnl_per_symbol: bucketsFrom(perSymbolItems), // REALIZED only
+    pnl_per_pair: bucketsFromPairs(perPairItems), // ← includes unmapped reasons in label
   };
 }
 
@@ -435,7 +827,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const startDateRaw = rqp.get("startDate");
     const endDateRaw = rqp.get("endDate") ?? todayUTCISO();
     const dayStartHour = parseDayStartHour(rqp.get("dayStartHour"));
-    const debug = rqp.get("debug") === "1";
+    const debugFlag = rqp.get("debug") === "1";
 
     const endIso = asISODateOrThrow(endDateRaw);
     let startIso: ISODate | null = startDateRaw
@@ -609,11 +1001,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         run_date_used: endIso,
         day_start_hour: dayStartHour,
       },
-      live_upnl, // ← NEW: live UPNL for realtime overlays
+      live_upnl, // live UPNL for realtime overlays
     };
 
     // Optional debug tail
-    if (debug) {
+    if (debugFlag) {
       const tails: Record<string, DebugTailItem[]> = {};
       for (const [k, m] of Object.entries(per_account)) {
         const d = [...m.daily].sort((a, b) => a.day.localeCompare(b.day));
