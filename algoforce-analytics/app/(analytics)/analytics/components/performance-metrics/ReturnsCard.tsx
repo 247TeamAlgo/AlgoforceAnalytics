@@ -16,8 +16,8 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
-import type { MetricsSlim } from "../../lib/types";
-import { fmtUsd } from "../../lib/types";
+import type { MetricsSlim } from "../../lib/performance_metric_types";
+import { fmtUsd } from "../../lib/performance_metric_types";
 
 type Row = { day: string; cum: number };
 

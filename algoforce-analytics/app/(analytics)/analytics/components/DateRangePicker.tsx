@@ -11,7 +11,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
-import { cn } from "../lib/types";
+import { cn } from "../lib/performance_metric_types";
 import { addDays, startOfMonth, startOfYear } from "date-fns";
 import { CalendarIcon } from "lucide-react";
 
@@ -26,28 +26,45 @@ type Props = {
   className?: string;
 };
 
-const UTC_FMT = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "UTC",
+/* ------------------ Local calendar helpers (no UTC shift) ------------------ */
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n);
+}
+
+/** Build "YYYY-MM-DD" from a Date using the *local* calendar. */
+function toISODateLocal(d: Date): string {
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1;
+  const day = d.getDate();
+  return `${y}-${pad2(m)}-${pad2(day)}`;
+}
+
+/** Parse "YYYY-MM-DD" to a Date at local midnight (no timezone gymnastics). */
+function fromISODateLocal(s?: string): Date | undefined {
+  if (!s) return undefined;
+  const [y, m, d] = s.split("-").map((x) => Number(x));
+  if (!y || !m || !d) return undefined;
+  return new Date(y, m - 1, d, 0, 0, 0, 0);
+}
+
+/** Pretty print a "YYYY-MM-DD" as a local date string. */
+const LOCAL_FMT = new Intl.DateTimeFormat("en-GB", {
   month: "short",
   day: "2-digit",
   year: "numeric",
 });
-
-function toISO(d: Date) {
-  return d.toISOString().slice(0, 10);
-}
-function fromISO(s?: string) {
-  if (!s) return undefined;
-  const [y, m, d] = s.split("-").map(Number);
-  return new Date(Date.UTC(y, (m ?? 1) - 1, d ?? 1));
-}
-function pretty(s?: string) {
+function prettyLocal(s?: string): string {
   if (!s) return "";
-  return UTC_FMT.format(new Date(`${s}T00:00:00Z`));
+  const dt = fromISODateLocal(s);
+  return dt ? LOCAL_FMT.format(dt) : "";
 }
+
 function todayISO(): string {
-  return toISO(new Date());
+  return toISODateLocal(new Date());
 }
+
+/* -------------------------------------------------------------------------- */
 
 export default function DateRangePicker({
   value,
@@ -64,22 +81,26 @@ export default function DateRangePicker({
   React.useEffect(() => setDraft(value), [value.start, value.end, value]);
   React.useEffect(() => setDraftEarliest(earliest), [earliest]);
 
-  const start = fromISO(draft.start);
-  const end = fromISO(draft.end);
+  const start = fromISODateLocal(draft.start);
+  const end = fromISODateLocal(draft.end);
 
   const triggerLabel = React.useMemo(() => {
     const s =
-      pretty(value.start) ||
+      prettyLocal(value.start) ||
       (earliest && !value.start ? "Earliest" : "Pick start");
-    const e = pretty(value.end) || "Pick end";
+    const e = prettyLocal(value.end) || "Pick end";
     return `${s} → ${e}`;
   }, [value.start, value.end, earliest]);
 
   const onSelectRange = (r: { from?: Date; to?: Date } | undefined) => {
     if (!r) return;
     setDraftEarliest(false);
-    const s = r.from ? toISO(r.from) : undefined;
-    const e = r.to ? toISO(r.to) : r.from ? toISO(r.from) : draft.end;
+    const s = r.from ? toISODateLocal(r.from) : undefined;
+    const e = r.to
+      ? toISODateLocal(r.to)
+      : r.from
+        ? toISODateLocal(r.from)
+        : draft.end;
     setDraft({ start: s, end: e });
   };
 
@@ -87,18 +108,27 @@ export default function DateRangePicker({
     const e = new Date();
     const s = addDays(e, -days + 1);
     setDraftEarliest(false);
-    setDraft({ start: toISO(s), end: toISO(e) });
+    setDraft({ start: toISODateLocal(s), end: toISODateLocal(e) });
   };
+
   const applyMTD = () => {
     const now = new Date();
     setDraftEarliest(false);
-    setDraft({ start: toISO(startOfMonth(now)), end: toISO(now) });
+    setDraft({
+      start: toISODateLocal(startOfMonth(now)),
+      end: toISODateLocal(now),
+    });
   };
+
   const applyYTD = () => {
     const now = new Date();
     setDraftEarliest(false);
-    setDraft({ start: toISO(startOfYear(now)), end: toISO(now) });
+    setDraft({
+      start: toISODateLocal(startOfYear(now)),
+      end: toISODateLocal(now),
+    });
   };
+
   const applyAllTime = () => {
     setDraft({ start: undefined, end: todayISO() });
     setDraftEarliest(true);
@@ -209,8 +239,8 @@ export default function DateRangePicker({
               Draft:{" "}
               {draftEarliest && !draft.start
                 ? "Earliest"
-                : pretty(draft.start) || "—"}{" "}
-              → {pretty(draft.end) || "—"}
+                : prettyLocal(draft.start) || "—"}{" "}
+              → {prettyLocal(draft.end) || "—"}
             </div>
           </div>
         </div>

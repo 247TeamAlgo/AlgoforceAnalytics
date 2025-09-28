@@ -1,50 +1,92 @@
-// app/api/v1/1-performance_metrics/performance_metric_types.ts
+/* Core scalar types */
+export type ISODate = string; // "YYYY-MM-DD"
 
-/* ---------- Core scalar types ---------- */
-export type ISODate = `${number}-${number}-${number}`;
+/* Buckets for per-symbol / per-pair */
+// "@/lib/performance_metric_types"
 
-/* ---------- Buckets (aggregations) ---------- */
 export interface Bucket {
-  label: string; // symbol, pair, etc.
-  total: number; // summed net PnL (USD)
+  label: string;
+  total: number;
+  /** Allow generic access so Bucket is compatible with Record<string, unknown> */
+  [k: string]: unknown;
 }
 
-/* ---------- Daily rows (calendarized, UTC) ---------- */
+/* Daily row (server output) */
 export interface DailySlim {
-  day: ISODate; // YYYY-MM-DD (UTC)
-  gross_pnl: number; // realized before fees
-  fees: number; // commissions/fees
-  net_pnl: number; // gross - fees (+ upnl on end date)
+  day: ISODate; // ISO YYYY-MM-DD (naive, boundary already applied server-side)
+  gross_pnl: number; // summed realized before fees
+  fees: number; // summed fees
+  net_pnl: number; // gross - fees (+ upnl on end if requested)
 }
 
-/* ---------- Streaks ---------- */
+/* Streaks structure */
 export interface StreaksSlim {
-  current: number; // current consecutive losing days
-  max: number; // maximum consecutive losing days in window
+  current: number; // current consecutive losses (strict negative only)
+  max: number; // max consecutive losses over the window
 }
 
-/* ---------- Metrics payload (per-account or merged) ---------- */
+/* Per-account metrics (slim) */
 export interface MetricsSlim {
-  initial_balance: number; // baseline USD
-  window_start: ISODate; // inclusive (UTC)
-  window_end: ISODate; // inclusive (UTC)
-  total_return_pct_over_window: number | null; // ((endEq - initial)/initial)*100
-  drawdown_mag: number; // positive magnitude (e.g., 0.1083 for -10.83%)
+  initial_balance: number;
+  window_start: ISODate;
+  window_end: ISODate;
+  total_return_pct_over_window: number | null; // percent, 2dp
+  drawdown_mag: number; // magnitude in [0..1], not percent
   streaks: StreaksSlim;
-  daily: DailySlim[]; // full calendarized series
-  pnl_per_symbol: Bucket[]; // summed by base symbol
-  pnl_per_pair: Bucket[]; // summed by pair (from tradesheet map)
+  daily: DailySlim[];
+
+  // Realized-only leaderboards (current behavior)
+  pnl_per_symbol: Bucket[];
+  pnl_per_pair: Bucket[];
+
+  // OPTIONAL live UPNL breakdowns (included when requested by the client)
+  /** Live UPNL per symbol from Redis (if available). */
+  upnl_per_symbol?: Bucket[];
+
+  /** Realized + live UPNL combined per symbol. */
+  pnl_per_symbol_incl_upnl?: Bucket[];
+
+  /** Placeholder for future pair-inclusive totals (requires positions→pair mapping for open legs). */
+  pnl_per_pair_incl_upnl?: Bucket[];
 }
 
-/* ---------- Multi-account response ---------- */
-export interface MultiMetricsResponseSlim {
-  selected: string[]; // redisNames
-  window: { start: ISODate; end: ISODate; earliest: boolean };
-  merged: MetricsSlim;
-  per_account: Record<string, MetricsSlim>;
-  ignored?: string[]; // unknown account keys requested
-  meta?: {
-    server_time_utc: string; // ISO timestamp (UTC)
-    run_date_used: ISODate; // equals window.end
-  };
+/* Account metadata returned by /api/accounts (lightly typed here for convenience) */
+export interface AccountInfoLite {
+  redisName: string;
+  display?: string;
+  monitored?: boolean;
 }
+
+/* Response meta; extended to include the applied day boundary */
+export interface ResponseMeta {
+  server_time_utc: string;
+  run_date_used: ISODate;
+  day_start_hour?: number; // 0..23; included when server wants to echo boundary used
+  /** Optional echo of client timezone for display only (no implicit boundary changes). */
+  tz_resolved?: string;
+}
+
+/* Optional debug payload to verify streak inputs */
+export interface DebugTailItem {
+  day: ISODate;
+  net: number;
+}
+export interface DebugInfo {
+  day_start_hour: number;
+  window: { start: ISODate; end: ISODate };
+  tails: Record<string, DebugTailItem[]>;
+}
+
+/* Heavy response (slim) */
+export interface MultiMetricsResponseSlim {
+  selected: string[]; // redisNames included
+  window: { start: ISODate; end: ISODate; earliest: boolean };
+  merged: MetricsSlim; // merged across selected
+  per_account: Record<string, MetricsSlim>; // keyed by redisName
+  ignored?: string[]; // invalid ids in request
+  meta: ResponseMeta; // includes boundary and optional tz echo
+  debug?: DebugInfo; // optional, behind ?debug=1
+}
+
+/* Re-export used in other files */
+export type { Bucket as BucketType };

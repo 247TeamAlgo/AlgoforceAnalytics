@@ -6,7 +6,7 @@ import { Toaster } from "sonner";
 import "./globals.css";
 
 import { Navbar } from "@/components/layout/NavBar";
-import { PrefsProvider } from "@/components/prefs";
+import { PrefsProvider } from "@/components/prefs/PrefsContext";
 
 export const metadata: Metadata = {
   title: "Algoforce Strategy Dashboard",

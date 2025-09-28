@@ -1,15 +1,18 @@
-// app/api/v1/1-performance_metrics/calculators/total_pnl_per_symbol.ts
-import type { Bucket } from "../performance_metric_types";
-import { baseFromSymbol } from "./z_math_helpers";
+import { Bucket } from "../performance_metric_types";
 
+/**
+ * Python-parity:
+ * Sum REALIZED net (realizedPnl - commission), grouped by the FULL symbol (e.g., "BTCUSDT").
+ * No base-asset collapsing and NO UPNL overlay.
+ */
 export function totalPnlPerSymbol(
   items: Array<{ symbol: string; net: number }>
 ): Bucket[] {
   const map = new Map<string, number>();
   for (const it of items) {
-    const base = baseFromSymbol((it.symbol || "").toUpperCase());
-    if (!base) continue;
-    map.set(base, (map.get(base) ?? 0) + it.net);
+    const sym = (it.symbol || "").toUpperCase().trim();
+    if (!sym) continue;
+    map.set(sym, (map.get(sym) ?? 0) + (Number.isFinite(it.net) ? it.net : 0));
   }
   return Array.from(map.entries()).map(([label, total]) => ({
     label,

@@ -1,4 +1,4 @@
-// app/(analytics)/analytics/components/performance-metrics/ConsecutiveLosingDaysThresholdsCard.tsx
+// ConsecutiveLosingDaysThresholdsCard.tsx
 "use client";
 
 import * as React from "react";
@@ -29,7 +29,14 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ChartContainer, type ChartConfig } from "@/components/ui/chart";
-import type { MetricsSlim } from "../../lib/types";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { MetricsSlim } from "../../lib/performance_metric_types";
 
 /* ---------------- types ---------------- */
 type ThresholdLevel = { value: number; label?: string }; // value in DAYS
@@ -38,17 +45,22 @@ type Row = {
   account: string;
   current: number; // current losing streak (days)
   max: number; // historical max losing streak (days)
-  crossedIndex: number; // -1 if none, else index of highest crossed level (by current)
-  color: string; // bar color (by crossed level, for CURRENT)
+  crossedIndex: number; // -1 if none
+  color: string; // bar color for CURRENT
 };
 
-/* Colors */
-const CURRENT_HEX = "#39A0ED"; // fallback for current when no threshold crossed
-// keep your existing color token
-const MAX_BAR_FILL = "var(--primary)";
+type SortMode =
+  | "alpha-asc"
+  | "alpha-desc"
+  | "current-asc"
+  | "current-desc"
+  | "max-asc"
+  | "max-desc";
 
-// tweak once here if you want to fine-tune
-const MAX_BAR_FILL_OPACITY = 0.50; // lighter
+/* Colors */
+const CURRENT_HEX = "#39A0ED";
+const MAX_BAR_FILL = "var(--primary)";
+const MAX_BAR_FILL_OPACITY = 0.5;
 
 const chartConfig: ChartConfig = {
   current: { label: "Current losing streak", color: "var(--chart-3)" },
@@ -104,8 +116,6 @@ function build(
         return { account, current: cur, max: mx, crossedIndex: idx, color };
       })
     : [];
-
-  rows.sort((a, b) => b.current - a.current || b.max - a.max);
 
   const maxData = rows.reduce((m, r) => Math.max(m, r.current, r.max), 0);
   const maxLevel = vals.reduce((m, v) => Math.max(m, v), 0);
@@ -241,6 +251,8 @@ export default function ConsecutiveLosingDaysThresholdsCard({
   levelColors?: string[];
   defaultBarColor?: string;
 }) {
+  const [sortMode, setSortMode] = React.useState<SortMode>("current-desc");
+
   const {
     rows,
     xMax,
@@ -254,8 +266,35 @@ export default function ConsecutiveLosingDaysThresholdsCard({
     [perAccounts, levels, levelColors, defaultBarColor]
   );
 
+  const sortedRows: Row[] = React.useMemo(() => {
+    const copy = [...rows];
+    copy.sort((a, b) => {
+      switch (sortMode) {
+        case "alpha-asc":
+          return a.account.localeCompare(b.account, undefined, {
+            sensitivity: "base",
+          });
+        case "alpha-desc":
+          return b.account.localeCompare(a.account, undefined, {
+            sensitivity: "base",
+          });
+        case "current-asc":
+          return a.current - b.current;
+        case "current-desc":
+          return b.current - a.current;
+        case "max-asc":
+          return a.max - b.max;
+        case "max-desc":
+          return b.max - a.max;
+        default:
+          return 0;
+      }
+    });
+    return copy;
+  }, [rows, sortMode]);
+
   const [contentRef, { width }] = useMeasure<HTMLDivElement>();
-  const rowCount = Math.max(1, rows.length);
+  const rowCount = Math.max(1, sortedRows.length);
 
   const widthFactor =
     width < 520 ? 0.96 : width < 800 ? 1.06 : width < 1100 ? 1.18 : 1.3;
@@ -276,7 +315,7 @@ export default function ConsecutiveLosingDaysThresholdsCard({
   const barSize = Math.max(12, Math.min(40, Math.round(baseBar * widthFactor)));
   const gapY = Math.round(barSize * 0.38);
 
-  const longest = rows.reduce((m, r) => Math.max(m, r.account.length), 0);
+  const longest = sortedRows.reduce((m, r) => Math.max(m, r.account.length), 0);
   const yAxisWidth = Math.max(
     112,
     Math.min(Math.floor(width * 0.34), longest * 7 + 20)
@@ -293,33 +332,59 @@ export default function ConsecutiveLosingDaysThresholdsCard({
   return (
     <Card className="w-full">
       <CardHeader className="pb-2 border-b">
-        <div className="flex items-start justify-between gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="min-w-0">
             <CardTitle>Consecutive Losing Days — Thresholds</CardTitle>
             <CardDescription>
-              Current vs{" "}
-              <span className="text-muted-foreground">max (muted)</span> losing
-              streak • dashed lines = thresholds (based on current)
+              Current and <span className="text-muted-foreground">max </span>{" "}
+              losing streak • dashed lines = thresholds (dont touch goods na)
             </CardDescription>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {anyCrossedL1 ? (
-              <span className="inline-flex items-center gap-1 text-sm text-destructive">
-                <BellRing className="h-4 w-4" />
-                Alarm (crossed{" "}
-                {orderedLevels[0]!.label ?? dayLabel(orderedLevels[0]!.value)})
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 text-[12px] text-muted-foreground">
-                <Bell className="h-4 w-4" />
-                Threshold @{" "}
-                {orderedLevels[0]!.label ?? dayLabel(orderedLevels[0]!.value)}
-              </span>
-            )}
+
+          {/* RIGHT COLUMN: stacked — alarm/top, selection/bottom */}
+          <div className="flex flex-col items-end gap-2">
+            <div className="flex items-center gap-2">
+              {anyCrossedL1 ? (
+                <span className="inline-flex items-center gap-1 text-sm text-destructive">
+                  <BellRing className="h-4 w-4" />
+                  Alarm (crossed{" "}
+                  {orderedLevels[0]!.label ?? dayLabel(orderedLevels[0]!.value)}
+                  )
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-[12px] text-muted-foreground">
+                  <Bell className="h-4 w-4" />
+                  Threshold @{" "}
+                  {orderedLevels[0]!.label ?? dayLabel(orderedLevels[0]!.value)}
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-3">
+              <Select
+                value={sortMode}
+                onValueChange={(v) => setSortMode(v as SortMode)}
+              >
+                <SelectTrigger className="h-8 w-[220px]">
+                  <SelectValue placeholder="Sort" />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  <SelectItem value="alpha-asc">Alphabetical (A–Z)</SelectItem>
+                  <SelectItem value="alpha-desc">Alphabetical (Z–A)</SelectItem>
+                  <SelectItem value="current-asc">
+                    Current (Ascending)
+                  </SelectItem>
+                  <SelectItem value="current-desc">
+                    Current (Descending)
+                  </SelectItem>
+                  <SelectItem value="max-asc">Max (Ascending)</SelectItem>
+                  <SelectItem value="max-desc">Max (Descending)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </div>
 
-        {/* Legend: Max (theme-aware) + thresholds */}
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <span
             className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs cursor-default"
@@ -329,7 +394,7 @@ export default function ConsecutiveLosingDaysThresholdsCard({
               aria-hidden
               className="h-2.5 w-2.5 rounded-[3px] bg-muted-foreground/65 dark:bg-foreground/75"
             />
-            <span className="text-muted-foreground">Max (muted)</span>
+            <span className="text-muted-foreground">Max Losing Days</span>
           </span>
 
           {legendAll.map((it, i) => (
@@ -351,9 +416,6 @@ export default function ConsecutiveLosingDaysThresholdsCard({
         </div>
       </CardHeader>
 
-      {/* Theme variables:
-          - light: muted gray, subtle
-          - dark:  white, noticeably brighter but still low opacity */}
       <CardContent
         ref={contentRef}
         className="
@@ -364,7 +426,7 @@ export default function ConsecutiveLosingDaysThresholdsCard({
           dark:[--maxbar-fill:0.68] dark:[--maxbar-stroke:0.85]
         "
       >
-        {!rows.length ? (
+        {!sortedRows.length ? (
           <div className="text-sm text-muted-foreground py-10 text-center">
             No data.
           </div>
@@ -376,7 +438,7 @@ export default function ConsecutiveLosingDaysThresholdsCard({
           >
             <BarChart
               accessibilityLayer
-              data={rows}
+              data={sortedRows}
               layout="vertical"
               barCategoryGap={gapY}
               margin={{
@@ -431,8 +493,6 @@ export default function ConsecutiveLosingDaysThresholdsCard({
                 )}
               />
 
-              {/* MAX streak (theme-aware, low opacity) */}
-              {/* MAX streak (muted via opacity, no HSL) */}
               <Bar
                 dataKey="max"
                 barSize={barSize}
@@ -450,9 +510,8 @@ export default function ConsecutiveLosingDaysThresholdsCard({
                 />
               </Bar>
 
-              {/* CURRENT streak (colored by crossed threshold) */}
               <Bar dataKey="current" radius={4} barSize={barSize}>
-                {rows.map((r) => (
+                {sortedRows.map((r) => (
                   <Cell key={r.account} fill={r.color || CURRENT_HEX} />
                 ))}
                 <LabelList
@@ -471,3 +530,9 @@ export default function ConsecutiveLosingDaysThresholdsCard({
     </Card>
   );
 }
+
+/* layout constants used above */
+const leftMargin = 0;
+const rightMargin = 48;
+const topMargin = 24;
+const bottomMargin = 6;

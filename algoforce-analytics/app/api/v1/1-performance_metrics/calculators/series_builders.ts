@@ -1,5 +1,5 @@
-// app/api/v1/1-performance_metrics/calculators/series_builders.ts
-import type { ISODate, DailySlim } from "../performance_metric_types";
+import { ISODate } from "@/app/(analytics)/analytics/lib/performance_metric_types";
+import { DailySlim } from "../performance_metric_types";
 
 export function toISODateUTC(d: Date): ISODate {
   return d.toISOString().slice(0, 10) as ISODate;
@@ -15,6 +15,10 @@ export function dateRangeUTC(startIso: ISODate, endIso: ISODate): ISODate[] {
   return out;
 }
 
+/**
+ * Build a dense daily series from [start..end], adding realized PnL and fees
+ * for each day and optionally appending a live UPNL adjustment to the last day.
+ */
 export function buildDailySeries(
   startIso: ISODate,
   endIso: ISODate,

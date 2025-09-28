@@ -10,8 +10,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { Account } from "../lib/types";
-import { cn, displayName } from "../lib/types";
+import type { Account } from "../lib/performance_metric_types";
+import { cn, displayName } from "../lib/performance_metric_types";
 import DateRangePicker from "./DateRangePicker";
 
 type IsoDate = string;

@@ -1,18 +1,21 @@
-// app/api/v1/upnl/route.ts
 import { NextResponse } from "next/server";
 import { redis } from "@/lib/db/redis";
 import {
   ACCOUNT_SET,
   ACCOUNTS_INFO,
 } from "@/app/api/v1/1-performance_metrics/calculators/accounts_json";
-import { loadUpnlSum } from "@/app/api/v1/1-performance_metrics/calculators/redis_parsers";
+import {
+  loadUpnlSum,
+  loadUpnlPerSymbolMap,
+} from "@/app/api/v1/1-performance_metrics/calculators/redis_parsers";
 
 type UpnlResponse = {
-  as_of: string; // ISO instant (UTC)
+  as_of: string;
   combined_upnl: number;
   per_account_upnl: Record<string, number>;
+  /** Optional live per-symbol breakdown per account. */
+  per_account_symbol_upnl?: Record<string, Record<string, number>>;
   base_snapshot_id?: string;
-  /** Accounts actually used by the server to compute this snapshot. */
   accounts: string[];
 };
 
@@ -30,19 +33,19 @@ export async function GET(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const sp = url.searchParams;
 
-    const requested = parseAccountsParam(sp);
+    const includeBreakdown =
+      sp.get("includeBreakdown") === "1" ||
+      sp.get("includeBreakdown") === "true";
 
-    // Defaults: monitored first; if none are flagged, fall back to all redisName
+    const requested = parseAccountsParam(sp);
     const monitoredDefaults = ACCOUNTS_INFO.filter((a) => !!a.monitored).map(
       (a) => a.redisName
     );
     const allRedisNames = ACCOUNTS_INFO.map((a) => a.redisName);
     const defaults =
       monitoredDefaults.length > 0 ? monitoredDefaults : allRedisNames;
-
     const accounts = requested.length > 0 ? requested : defaults;
 
-    // Validate against known redisName set
     const unknown = accounts.filter((a) => !ACCOUNT_SET.has(a));
     if (unknown.length > 0) {
       return NextResponse.json(
@@ -53,12 +56,17 @@ export async function GET(req: Request): Promise<Response> {
 
     const r = redis();
 
-    // Fetch live UPNL for each account's `${redisName}_live` key
     const per_account_upnl: Record<string, number> = {};
+    const per_account_symbol_upnl: Record<string, Record<string, number>> = {};
+
     await Promise.all(
       accounts.map(async (acc) => {
         const v = await loadUpnlSum(r, acc);
         per_account_upnl[acc] = Number.isFinite(v) ? v : 0;
+
+        if (includeBreakdown) {
+          per_account_symbol_upnl[acc] = await loadUpnlPerSymbolMap(r, acc);
+        }
       })
     );
 
@@ -66,19 +74,19 @@ export async function GET(req: Request): Promise<Response> {
       (s, a) => s + (per_account_upnl[a] ?? 0),
       0
     );
-
-    const base_snapshot_id = sp.get("base_snapshot_id") || undefined; // optional echo
+    const base_snapshot_id = sp.get("base_snapshot_id") || undefined;
 
     const body: UpnlResponse = {
       as_of: new Date().toISOString(),
       combined_upnl,
       per_account_upnl,
       base_snapshot_id,
-      accounts, // echo back for visibility
+      accounts,
+      ...(includeBreakdown ? { per_account_symbol_upnl } : {}),
     };
 
     const res = NextResponse.json(body, { status: 200 });
-    res.headers.set("Cache-Control", "no-store, must-revalidate"); // live endpoint
+    res.headers.set("Cache-Control", "no-store, must-revalidate");
     return res;
   } catch (err) {
     // eslint-disable-next-line no-console

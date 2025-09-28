@@ -1,4 +1,3 @@
-// app/api/v1/1-performance_metrics/calculators/sql_fetch.ts
 import type { Pool, RowDataPacket } from "mysql2/promise";
 
 export interface TradeRow {
@@ -7,7 +6,7 @@ export interface TradeRow {
   orderId: string; // bigNumberStrings=true -> string
   realizedPnl: string | number | null;
   commission: string | number | null;
-  time: string; // "YYYY-MM-DD HH:mm:ss" (UTC, dateStrings=true)
+  time: string; // "YYYY-MM-DD HH:mm:ss" (naive DATETIME; dateStrings=true)
 }
 
 const SELECT_SQL = `
@@ -17,8 +16,9 @@ const SELECT_SQL = `
 `;
 
 /**
- * Try a sequence of candidate table names (redisName first, then binanceName).
+ * Try a sequence of candidate table names (redisName, then binanceName, then dbName).
  * Returns rows from the first table that exists; empty array if none exist.
+ * The time window is inclusive of both endpoints.
  */
 export async function selectFromFirstExistingTable(
   pool: Pool,

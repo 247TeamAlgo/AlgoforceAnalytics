@@ -1,13 +1,21 @@
 // app/api/v1/1-performance_metrics/calculators/z_math_helpers.ts
+// (kept local to calculators; no dependency on client lib)
 
-import type { DailySlim, StreaksSlim } from "../performance_metric_types";
+export interface DailySlim {
+  day: string; // ISO YYYY-MM-DD
+  net_pnl: number;
+}
+export interface StreaksSlim {
+  current: number;
+  max: number;
+}
 
-/** YYYY-MM-DD from a JS Date in UTC. */
+/** YYYY-MM-DD from a JS Date in UTC (used only for range generation). */
 export function toISODateUTC(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Build full UTC calendar [start..end] as ISO dates. */
+/** Build full calendar [start..end] as ISO dates (no tz semantics needed). */
 export function dateRangeUTC(startIso: string, endIso: string): string[] {
   const out: string[] = [];
   const d0 = new Date(`${startIso}T00:00:00.000Z`);
@@ -18,12 +26,12 @@ export function dateRangeUTC(startIso: string, endIso: string): string[] {
   return out;
 }
 
-/** Compute consecutive losing streaks from daily net pnl (<0 counts). */
+/** Consecutive losing streaks from daily net pnl where ONLY < 0 counts. */
 export function losingStreaksFromDaily(daily: DailySlim[]): StreaksSlim {
   let cur = 0;
   let max = 0;
   for (const r of daily) {
-    if (r.net_pnl < 0) {
+    if ((r?.net_pnl ?? 0) < 0) {
       cur += 1;
       if (cur > max) max = cur;
     } else {
@@ -36,7 +44,7 @@ export function losingStreaksFromDaily(daily: DailySlim[]): StreaksSlim {
 /** Max drawdown magnitude (positive) from equity series. */
 export function drawdownMagnitude(equity: number[]): number {
   let peak = Number.NEGATIVE_INFINITY;
-  let minDD = 0; // most negative
+  let minDD = 0;
   for (const v of equity) {
     if (v > peak) peak = v;
     if (peak > 0) {

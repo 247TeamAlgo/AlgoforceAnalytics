@@ -1,5 +1,5 @@
 // app/api/v1/1-performance_metrics/calculators/total_pnl_per_pair.ts
-import type { Bucket } from "../performance_metric_types";
+type Bucket = { label: string; total: number };
 
 export function totalPnlPerPair(
   items: Array<{ pair: string; net: number }>
