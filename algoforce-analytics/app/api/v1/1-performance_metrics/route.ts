@@ -38,6 +38,8 @@ import {
   MultiMetricsResponseSlim,
 } from "./performance_metric_types";
 
+import { getStreak, LossStreak } from "./calculators/consecutive_losing_days_v2"
+
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
@@ -792,13 +794,17 @@ async function buildAccountMetrics(
   const { drawdown_mag, streaks, total_return_pct_over_window } =
     recomputeFromDaily(initial_balance, daily);
 
+  console.log(`${info.redisName}, ${startTs}, ${endTs}`)
+  const streaks_v2: LossStreak = await getStreak(info.redisName, startIso=startIso, endIso=endIso);
+
   return {
     initial_balance,
     window_start: startIso,
     window_end: endIso,
     total_return_pct_over_window,
     drawdown_mag,
-    streaks,
+    // streaks,
+    streaks: streaks_v2,
     daily,
     pnl_per_symbol: bucketsFrom(perSymbolItems), // REALIZED only
     pnl_per_pair: bucketsFromPairs(perPairItems), // ← includes unmapped reasons in label

@@ -337,7 +337,8 @@ export default function ConsecutiveLosingDaysThresholdsCard({
             <CardTitle>Consecutive Losing Days — Thresholds</CardTitle>
             <CardDescription>
               Current and <span className="text-muted-foreground">max </span>{" "}
-              losing streak • dashed lines = thresholds (dont touch goods na)
+              losing streak • dashed lines = thresholds
+              {/* Needs more checking */}
             </CardDescription>
           </div>
 
