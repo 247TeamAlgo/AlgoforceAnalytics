@@ -91,7 +91,7 @@ async function fetchHeavy(
     params.set("endDate", range.end);
   }
   // Align with backend boundary (your code uses 8)
-  params.set("dayStartHour", "8");
+  params.set("dayStartHour", "0");
 
   // Ask server to include baseline live snapshot (for delta computation)
   params.set("includeUpnl", "1");

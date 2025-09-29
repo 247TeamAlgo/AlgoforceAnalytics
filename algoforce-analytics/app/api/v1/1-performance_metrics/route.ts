@@ -27,7 +27,7 @@ import {
 
 import {
   buildDailySeries,
-  drawdownMagnitude,
+  // drawdownMagnitude,
   equityFromDaily,
 } from "./calculators/series_builders";
 
@@ -389,6 +389,100 @@ async function earliestStartAcrossAccounts(
   return (minD as ISODate | null) ?? null;
 }
 
+// "YYYY-MM"
+function monthKeyISOfromISODate(isoDay: ISODate): string {
+  return isoDay.slice(0, 7);
+}
+
+/** Monthly max-drawdown *magnitude* (>= 0) with peak reset at each month. */
+function drawdownMagnitudeByMonth(
+  daily: ReadonlyArray<{ day: ISODate }>,
+  equity: readonly number[]
+): Readonly<Record<string, number>> {
+  if (daily.length !== equity.length) {
+    throw new Error(`length mismatch: daily=${daily.length} equity=${equity.length}`);
+  }
+
+  const out: Record<string, number> = {};
+  if (daily.length === 0) return out;
+
+  let curMonth = monthKeyISOfromISODate(daily[0]!.day);
+  let peak = Number.NEGATIVE_INFINITY;
+  let minDD = 0; // most negative within the month (<= 0)
+
+  const commit = (mon: string): void => {
+    out[mon] = peak > 0 && Number.isFinite(peak) ? Math.abs(minDD) : 0;
+  };
+
+  for (let i = 0; i < daily.length; i++) {
+    const mon = monthKeyISOfromISODate(daily[i]!.day);
+    const v = equity[i]!;
+
+    if (mon !== curMonth) {
+      commit(curMonth);                 // finalize previous month
+      curMonth = mon;                   // reset state for new month
+      peak = Number.NEGATIVE_INFINITY;
+      minDD = 0;
+    }
+
+    if (v > peak) peak = v;
+    if (peak > 0) {
+      const dd = v / peak - 1;         // signed (<= 0)
+      if (dd < minDD) minDD = dd;
+    }
+  }
+
+  commit(curMonth); // last month
+  return out;
+}
+
+/** Convenience: current month’s drawdown magnitude (>= 0). */
+function currentMonthDrawdownMagnitude(
+  daily: ReadonlyArray<{ day: ISODate }>,
+  equity: readonly number[]
+): number {
+  if (daily.length === 0) return 0;
+  const byMonth = drawdownMagnitudeByMonth(daily, equity);
+  const lastMonth = monthKeyISOfromISODate(daily[daily.length - 1]!.day);
+  return byMonth[lastMonth] ?? 0;
+}
+
+/** Current month key "YYYY-MM". */
+function lastMonthKeyFromDaily(daily: ReadonlyArray<{ day: ISODate }>): string | null {
+  if (!daily.length) return null;
+  return daily[daily.length - 1]!.day.slice(0, 7);
+}
+
+/** Current-month return in percent from an equity level series.
+ * Uses the first equity value in the current month as baseline,
+ * i.e. (lastEq - firstEq) / firstEq * 100.
+ */
+function currentMonthReturnPct(
+  daily: ReadonlyArray<{ day: ISODate }>,
+  equity: readonly number[]
+): number | null {
+  if (daily.length === 0 || daily.length !== equity.length) return null;
+  const lastMonth = lastMonthKeyFromDaily(daily);
+  if (!lastMonth) return null;
+
+  // find first index in current month
+  let firstIdx = -1;
+  for (let i = 0; i < daily.length; i++) {
+    if (daily[i]!.day.slice(0, 7) === lastMonth) {
+      firstIdx = i;
+      break;
+    }
+  }
+  if (firstIdx < 0) return null;
+
+  const firstEq = equity[firstIdx]!;
+  const lastEq = equity[equity.length - 1]!;
+  if (!(firstEq > 0)) return null;
+
+  const pct = ((lastEq - firstEq) / firstEq) * 100;
+  return Number(pct.toFixed(2));
+}
+
 function recomputeFromDaily(
   initial: number,
   dailyIn: MetricsSlim["daily"]
@@ -398,18 +492,20 @@ function recomputeFromDaily(
 > {
   const daily = [...dailyIn].sort((a, b) => a.day.localeCompare(b.day));
 
+  // Equity level across the window (do NOT reset across months here).
   const eq = equityFromDaily(initial, daily);
-  const drawdown_mag = drawdownMagnitude(eq);
+
+  // MTD drawdown magnitude (peak resets each month).
+  const drawdown_mag = currentMonthDrawdownMagnitude(daily, eq);
 
   const streaks = streaksFromDailyStrictNegative(daily);
 
-  const endEq = eq.length ? eq[eq.length - 1]! : initial;
-  const total_return_pct_over_window =
-    initial > 0
-      ? Number((((endEq - initial) / initial) * 100).toFixed(2))
-      : null;
+  // MTD return (first vs last equity within the current month).
+  const total_return_pct_over_window = currentMonthReturnPct(daily, eq);
+
   return { drawdown_mag, streaks, total_return_pct_over_window };
 }
+
 
 /* ───────────────────── pair resolver: SQL fills ⇄ tradesheet rows ───────────────────── */
 

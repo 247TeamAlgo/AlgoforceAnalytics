@@ -191,11 +191,11 @@ export default function AnalyticsPage() {
           )}
 
           {/* Realized totals by pair (no live overlay available for pairs) */}
-          {merged ? (
+          {/* {merged ? (
             <TotalPnlByPairCard metrics={merged} />
           ) : (
             <NoData title="Total PnL — Pairs" subtitle="Ranked" />
-          )}
+          )} */}
 
           {merged ? (
             <ReturnsCard merged={merged} liveUpnl={combinedUpnl} />
