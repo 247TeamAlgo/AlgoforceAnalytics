@@ -3,7 +3,7 @@ import fs from "node:fs";
 
 export function readBaselineUsd(account: string): number {
   const defaultPath =
-    "C:\\Users\\Algoforce\\Documents\\GitHub\\Algoforce\\AFMonitor\\dashboard\\balance.json";
+    "C:\\Users\\Algoforce\\Documents\\GitHub\\Algoforce\\AFMonitor\\dashboard\\analytics_balance.json";
   const path = process.env.BASELINE_BALANCE_JSON || defaultPath;
   try {
     const txt = fs.readFileSync(path, "utf-8");

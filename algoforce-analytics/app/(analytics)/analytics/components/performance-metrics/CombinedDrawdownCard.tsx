@@ -54,6 +54,7 @@ type Row = {
 
 type DrawdownMode = "monthly" | "current" | "min";
 type SortMode = "alpha-asc" | "alpha-desc" | "dd-asc" | "dd-desc";
+type MonthMode = `m:${string}` | "worst"; // m:YYYY-MM or worst across range
 
 const chartConfig: ChartConfig = {
   ddMag: { label: "Drawdown", color: "var(--chart-2)" },
@@ -71,70 +72,41 @@ function ensureNumber(n: unknown, fallback = 0): number {
   return fallback;
 }
 
-/* ---------------- equity + drawdown math ---------------- */
+/* ---------------- helpers ---------------- */
 
-function buildEquitySeriesWithUpnlDelta(
-  acc: MetricsSlim,
-  upnlDelta: unknown
+function monthKey(isoDay: string): string {
+  return isoDay.slice(0, 7); // "YYYY-MM"
+}
+function monthLabel(mk: string): string {
+  const [y, m] = mk.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, 1));
+  return dt.toLocaleString(undefined, { month: "short", year: "numeric" });
+}
+function sortDaily(d: NonNullable<MetricsSlim["daily"]>): typeof d {
+  return [...d].sort((a, b) => a.day.localeCompare(b.day));
+}
+
+/** Build equity for full window; optionally adjust last point by live delta. */
+function buildEquityFull(
+  initial: number,
+  daily: NonNullable<MetricsSlim["daily"]>,
+  liveDelta?: number
 ): number[] {
-  const init = ensureNumber(acc.initial_balance, 0);
-  const days = [...(acc.daily ?? [])].sort((a, b) =>
-    a.day.localeCompare(b.day)
-  );
+  const d = sortDaily(daily);
+  const eq: number[] = [initial];
+  let bal = initial;
+  const lastIdx = d.length - 1;
 
-  let bal = init;
-  const eq: number[] = [bal];
-  const lastIdx = days.length - 1;
-
-  for (let i = 0; i < days.length; i += 1) {
-    const net0 = ensureNumber(days[i]!.net_pnl, 0);
-    const net = i === lastIdx ? net0 + ensureNumber(upnlDelta, 0) : net0;
+  for (let i = 0; i < d.length; i += 1) {
+    let net = ensureNumber(d[i]!.net_pnl, 0);
+    if (i === lastIdx && liveDelta) net += liveDelta;
     bal += net;
     eq.push(bal);
   }
-  return eq;
+  return eq; // length = d.length + 1
 }
 
-function buildCombinedEquityWithUpnlDelta(
-  perAccounts: Record<string, MetricsSlim>,
-  combinedUpnlDelta?: unknown
-): number[] {
-  const keys = Object.keys(perAccounts);
-  if (!keys.length) return [0];
-
-  const daySet = new Set<string>();
-  for (const k of keys)
-    for (const r of perAccounts[k]!.daily) daySet.add(r.day);
-  const dayOrder = Array.from(daySet).sort();
-
-  const byDay = new Map<string, number>();
-  for (const k of keys) {
-    for (const r of perAccounts[k]!.daily) {
-      byDay.set(
-        r.day,
-        ensureNumber(byDay.get(r.day), 0) + ensureNumber(r.net_pnl, 0)
-      );
-    }
-  }
-
-  const initTotal = keys.reduce(
-    (s, k) => s + ensureNumber(perAccounts[k]!.initial_balance, 0),
-    0
-  );
-
-  const eq: number[] = [initTotal];
-  let bal = initTotal;
-  for (const d of dayOrder) {
-    bal += ensureNumber(byDay.get(d), 0);
-    eq.push(bal);
-  }
-
-  const u = ensureNumber(combinedUpnlDelta, 0);
-  if (u !== 0 && eq.length > 0) eq[eq.length - 1] = eq[eq.length - 1]! + u;
-  return eq;
-}
-
-/** Max drawdown magnitude over series. */
+/** Max drawdown magnitude over an equity slice (array of equity *levels*). */
 function minDrawdownMagnitudeFromEquity(eq: number[]): number {
   if (eq.length === 0) return 0;
   let peak = eq[0]!;
@@ -150,77 +122,69 @@ function minDrawdownMagnitudeFromEquity(eq: number[]): number {
   return Math.abs(minDD);
 }
 
-/** Current drawdown magnitude from latest vs peak. */
-function currentDrawdownMagnitudeFromEquity(eq: number[]): number {
-  if (eq.length === 0) return 0;
-  let peak = eq[0]!;
-  for (let i = 1; i < eq.length; i += 1) if (eq[i]! > peak) peak = eq[i]!;
-  if (peak <= 0) return 0;
-  const last = eq[eq.length - 1]!;
-  const dd = last / peak - 1;
-  return dd < 0 ? -dd : 0;
-}
-
-function monthKey(isoDay: string): string {
-  return isoDay.slice(0, 7);
-}
-
-/** Latest month’s min drawdown magnitude from account daily (inject delta only on last day). */
-function latestMonthlyMinDDFromAccount(
+/* ---------- monthly DD (specific month) for a single account ---------- */
+/**
+ * Returns the max DD magnitude *within target month*, with peak reset at the start of that month.
+ * Live UPNL (delta) is applied to the final equity point only if the target month is the last
+ * month present in this account’s daily series and a live delta is provided.
+ */
+function monthlyDDforMonth_Account(
   acc: MetricsSlim,
-  upnlDelta: unknown
+  targetMonth: string,
+  liveDeltaMaybe?: number
 ): number {
-  const daily = [...(acc.daily ?? [])].sort((a, b) =>
-    a.day.localeCompare(b.day)
+  const daily = sortDaily(acc.daily ?? []);
+  if (!daily.length) return 0;
+
+  const months = Array.from(new Set(daily.map((r) => monthKey(r.day)))).sort();
+  const accLastMonth = months[months.length - 1];
+
+  // Build equity without live first to get month boundary values
+  const eqNoLive = buildEquityFull(
+    ensureNumber(acc.initial_balance, 0),
+    daily,
+    0
   );
-  if (daily.length === 0) return 0;
 
-  const init = ensureNumber(acc.initial_balance, 0);
-  let bal = init;
-  const lastIdx = daily.length - 1;
-
-  let curMonth = "";
-  let monthPeak = Number.NEGATIVE_INFINITY;
-  let monthMinDD = 0; // ≤ 0
-
+  // slice indices for the target month
+  let firstIdx = -1;
+  let lastIdx = -1;
   for (let i = 0; i < daily.length; i += 1) {
-    const r = daily[i]!;
-    const net0 = ensureNumber(r.net_pnl, 0);
-    const net = i === lastIdx ? net0 + ensureNumber(upnlDelta, 0) : net0;
-
-    bal += net;
-
-    const mk = monthKey(r.day);
-    if (mk !== curMonth) {
-      curMonth = mk;
-      monthPeak = bal;
-      monthMinDD = 0;
-    } else if (bal > monthPeak) {
-      monthPeak = bal;
-    }
-
-    if (monthPeak > 0) {
-      const dd = bal / monthPeak - 1;
-      if (dd < monthMinDD) monthMinDD = dd;
+    if (monthKey(daily[i]!.day) === targetMonth) {
+      if (firstIdx < 0) firstIdx = i;
+      lastIdx = i;
     }
   }
-  return Math.abs(monthMinDD);
+  if (firstIdx < 0 || lastIdx < 0) return 0;
+
+  // Build the equity slice for that month: start level then each day end level
+  const slice = eqNoLive.slice(firstIdx + 1, lastIdx + 2);
+
+  // If month is the last month for the account, add live delta to the final point
+  if (targetMonth === accLastMonth && liveDeltaMaybe) {
+    slice[slice.length - 1] =
+      slice[slice.length - 1]! + ensureNumber(liveDeltaMaybe, 0);
+  }
+
+  return minDrawdownMagnitudeFromEquity(slice);
 }
 
-/** Latest month’s min drawdown for combined. */
-function latestMonthlyMinDDCombined(
+/* ---------- monthly DD (specific month) for Combined ("All") ---------- */
+function monthlyDDforMonth_Combined(
   perAccounts: Record<string, MetricsSlim>,
-  combinedUpnlDelta?: unknown
+  targetMonth: string,
+  combinedLiveDeltaMaybe?: number
 ): number {
   const keys = Object.keys(perAccounts);
   if (!keys.length) return 0;
 
-  const agg = new Map<string, number>(); // day -> net sum
+  // Build per-day net sums and initial total
   let initial = 0;
+  const agg = new Map<string, number>(); // day -> net
   for (const k of keys) {
     const m = perAccounts[k]!;
     initial += ensureNumber(m.initial_balance, 0);
-    for (const r of m.daily) {
+    for (const r of m.daily ?? []) {
       agg.set(
         r.day,
         ensureNumber(agg.get(r.day), 0) + ensureNumber(r.net_pnl, 0)
@@ -231,32 +195,81 @@ function latestMonthlyMinDDCombined(
   const days = Array.from(agg.keys()).sort();
   if (!days.length) return 0;
 
-  const lastDay = days[days.length - 1]!;
+  // Determine months present in combined series
+  const months = Array.from(new Set(days.map(monthKey))).sort();
+  const combinedLastMonth = months[months.length - 1];
+
+  // Build combined equity without live
+  const eqNoLive: number[] = [initial];
   let bal = initial;
-  let curMonth = "";
-  let monthPeak = Number.NEGATIVE_INFINITY;
-  let monthMinDD = 0;
-
   for (const d of days) {
-    let net = ensureNumber(agg.get(d), 0);
-    if (d === lastDay) net += ensureNumber(combinedUpnlDelta, 0);
-    bal += net;
+    bal += ensureNumber(agg.get(d), 0);
+    eqNoLive.push(bal);
+  }
 
-    const mk = monthKey(d);
-    if (mk !== curMonth) {
-      curMonth = mk;
-      monthPeak = bal;
-      monthMinDD = 0;
-    } else if (bal > monthPeak) {
-      monthPeak = bal;
-    }
-
-    if (monthPeak > 0) {
-      const dd = bal / monthPeak - 1;
-      if (dd < monthMinDD) monthMinDD = dd;
+  // locate first and last index for the target month
+  let firstIdx = -1;
+  let lastIdx = -1;
+  for (let i = 0; i < days.length; i += 1) {
+    if (monthKey(days[i]!) === targetMonth) {
+      if (firstIdx < 0) firstIdx = i;
+      lastIdx = i;
     }
   }
-  return Math.abs(monthMinDD);
+  if (firstIdx < 0 || lastIdx < 0) return 0;
+
+  const slice = eqNoLive.slice(firstIdx + 1, lastIdx + 2);
+
+  if (targetMonth === combinedLastMonth && combinedLiveDeltaMaybe) {
+    slice[slice.length - 1] =
+      slice[slice.length - 1]! + ensureNumber(combinedLiveDeltaMaybe, 0);
+  }
+
+  return minDrawdownMagnitudeFromEquity(slice);
+}
+
+/* ---------- worst (max) monthly DD over a set of months ---------- */
+function worstMonthlyDD_Account(
+  acc: MetricsSlim,
+  months: string[],
+  liveDeltaMaybe?: number
+): number {
+  if (!months.length) return 0;
+  const lastMonthForAcc = Array.from(
+    new Set((acc.daily ?? []).map((r) => monthKey(r.day)))
+  )
+    .sort()
+    .at(-1);
+  let worst = 0;
+  for (const mk of months) {
+    const useLive = mk === lastMonthForAcc ? liveDeltaMaybe : 0;
+    const v = monthlyDDforMonth_Account(acc, mk, useLive);
+    if (v > worst) worst = v;
+  }
+  return worst;
+}
+function worstMonthlyDD_Combined(
+  perAccounts: Record<string, MetricsSlim>,
+  months: string[],
+  combinedLiveDeltaMaybe?: number
+): number {
+  if (!months.length) return 0;
+  const allDays = new Set<string>();
+  for (const m of Object.values(perAccounts))
+    (m.daily ?? []).forEach((r) => allDays.add(r.day));
+  const lastMonthCombined = Array.from(allDays)
+    .sort()
+    .map(monthKey)
+    .sort()
+    .at(-1);
+
+  let worst = 0;
+  for (const mk of months) {
+    const useLive = mk === lastMonthCombined ? combinedLiveDeltaMaybe : 0;
+    const v = monthlyDDforMonth_Combined(perAccounts, mk, useLive);
+    if (v > worst) worst = v;
+  }
+  return worst;
 }
 
 /* ---------------- UI sizing helpers ---------------- */
@@ -293,7 +306,7 @@ function DrawdownThresholdTooltip({
   payload?: unknown[];
   legend: Array<{ x: number; label: string; color: string }>;
   mags: number[];
-  modeLabel: "Monthly" | "Current" | "Minimum";
+  modeLabel: string; // generic label like "Aug 2025", "worst month", "current"
 }) {
   const item = Array.isArray(payload) ? (payload[0] as unknown) : undefined;
   const rowObj =
@@ -320,7 +333,7 @@ function DrawdownThresholdTooltip({
       <div className="flex items-center justify-between gap-2">
         <div className="font-medium truncate">{accountLabel}</div>
         <Badge variant="secondary" className="shrink-0">
-          {pctFromMag(val)} {modeLabel.toLowerCase()}
+          {pctFromMag(val)} {modeLabel}
         </Badge>
       </div>
 
@@ -374,7 +387,7 @@ function DrawdownThresholdTooltip({
 
 export default function CombinedDrawdownCard({
   perAccounts,
-  // IMPORTANT: these must be DELTAS for parity; we will pass delta props from the hook.
+  // IMPORTANT: deltas (now - baseline) to avoid double counting realized PnL.
   upnlDeltaMap = {},
   combinedUpnlDelta,
   upnlAsOf,
@@ -417,6 +430,32 @@ export default function CombinedDrawdownCard({
   const [sortMode, setSortMode] = React.useState<SortMode>("dd-desc");
   const keys = React.useMemo(() => Object.keys(accounts), [accounts]);
 
+  // Detect months present across all accounts (union)
+  const monthsInRange = React.useMemo(() => {
+    const set = new Set<string>();
+    for (const k of keys)
+      (accounts[k]!.daily ?? []).forEach((r) => set.add(monthKey(r.day)));
+    return Array.from(set).sort();
+  }, [accounts, keys]);
+
+  // local month mode (default to last month if exists; else worst)
+  const [monthMode, setMonthMode] = React.useState<MonthMode>(() =>
+    monthsInRange.length
+      ? (`m:${monthsInRange[monthsInRange.length - 1]}` as MonthMode)
+      : "worst"
+  );
+  React.useEffect(() => {
+    if (!monthsInRange.length) {
+      setMonthMode("worst");
+      return;
+    }
+    const current = monthMode.startsWith("m:") ? monthMode.slice(2) : "";
+    if (!current || !monthsInRange.includes(current)) {
+      setMonthMode(`m:${monthsInRange[monthsInRange.length - 1]}` as MonthMode);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [monthsInRange.join("|")]);
+
   const orderedLevels = React.useMemo(
     () => [...levels].sort((a, b) => a.value - b.value),
     [levels]
@@ -431,18 +470,50 @@ export default function CombinedDrawdownCard({
 
     for (const k of keys) {
       const acc = accounts[k]!;
-      const delta = (upnlDeltaMap as Record<string, number | string>)[k] ?? 0;
+      const delta = ensureNumber(
+        (upnlDeltaMap as Record<string, unknown>)[k],
+        0
+      );
 
-      const mag =
-        drawdownMode === "monthly"
-          ? latestMonthlyMinDDFromAccount(acc, delta)
-          : drawdownMode === "current"
-            ? currentDrawdownMagnitudeFromEquity(
-                buildEquitySeriesWithUpnlDelta(acc, delta)
-              )
-            : minDrawdownMagnitudeFromEquity(
-                buildEquitySeriesWithUpnlDelta(acc, delta)
-              );
+      let mag = 0;
+
+      if (drawdownMode === "monthly") {
+        if (!monthsInRange.length) {
+          mag = 0;
+        } else if (monthMode === "worst") {
+          mag = worstMonthlyDD_Account(acc, monthsInRange, delta);
+        } else {
+          const mkey = monthMode.slice(2); // YYYY-MM
+          // include live only when this month is the last month for this account
+          const accMonths = Array.from(
+            new Set((acc.daily ?? []).map((r) => monthKey(r.day)))
+          ).sort();
+          const accLastMonth = accMonths.at(-1);
+          const liveForThisMonth = mkey === accLastMonth ? delta : 0;
+          mag = monthlyDDforMonth_Account(acc, mkey, liveForThisMonth);
+        }
+      } else if (drawdownMode === "current") {
+        // current vs last peak over full window
+        const eq = buildEquityFull(
+          ensureNumber(acc.initial_balance, 0),
+          acc.daily ?? [],
+          delta
+        );
+        if (eq.length) {
+          let peak = eq[0]!;
+          const last = eq[eq.length - 1]!;
+          for (const v of eq) if (v > peak) peak = v;
+          mag = peak > 0 && last < peak ? (peak - last) / peak : 0;
+        }
+      } else {
+        // minimum (worst) over entire window
+        const eq = buildEquityFull(
+          ensureNumber(acc.initial_balance, 0),
+          acc.daily ?? [],
+          delta
+        );
+        mag = minDrawdownMagnitudeFromEquity(eq);
+      }
 
       let idx = -1;
       for (let i = 0; i < mags.length; i += 1) {
@@ -473,16 +544,85 @@ export default function CombinedDrawdownCard({
     });
 
     if (includeCombined && keys.length > 0) {
-      const magC =
-        drawdownMode === "monthly"
-          ? latestMonthlyMinDDCombined(accounts, combinedUpnlDelta)
-          : drawdownMode === "current"
-            ? currentDrawdownMagnitudeFromEquity(
-                buildCombinedEquityWithUpnlDelta(accounts, combinedUpnlDelta)
-              )
-            : minDrawdownMagnitudeFromEquity(
-                buildCombinedEquityWithUpnlDelta(accounts, combinedUpnlDelta)
-              );
+      let magC = 0;
+
+      if (drawdownMode === "monthly") {
+        if (!monthsInRange.length) {
+          magC = 0;
+        } else if (monthMode === "worst") {
+          magC = worstMonthlyDD_Combined(
+            accounts,
+            monthsInRange,
+            ensureNumber(combinedUpnlDelta, 0)
+          );
+        } else {
+          const mkey = monthMode.slice(2);
+          const allDays = new Set<string>();
+          for (const m of Object.values(accounts))
+            (m.daily ?? []).forEach((r) => allDays.add(r.day));
+          const lastMonthCombined = Array.from(allDays)
+            .sort()
+            .map(monthKey)
+            .sort()
+            .at(-1);
+          const liveForThisMonth =
+            mkey === lastMonthCombined ? ensureNumber(combinedUpnlDelta, 0) : 0;
+          magC = monthlyDDforMonth_Combined(accounts, mkey, liveForThisMonth);
+        }
+      } else if (drawdownMode === "current") {
+        // combined current DD over full window
+        const agg = new Map<string, number>();
+        let init = 0;
+        for (const k of Object.keys(accounts)) {
+          const m = accounts[k]!;
+          init += ensureNumber(m.initial_balance, 0);
+          for (const r of m.daily ?? []) {
+            agg.set(
+              r.day,
+              ensureNumber(agg.get(r.day), 0) + ensureNumber(r.net_pnl, 0)
+            );
+          }
+        }
+        const days = Array.from(agg.keys()).sort();
+        const eq: number[] = [init];
+        let bal = init;
+        for (const d of days) {
+          bal += ensureNumber(agg.get(d), 0);
+          eq.push(bal);
+        }
+        if (eq.length) {
+          eq[eq.length - 1] =
+            eq[eq.length - 1]! + ensureNumber(combinedUpnlDelta, 0);
+          let peak = eq[0]!;
+          const last = eq[eq.length - 1]!;
+          for (const v of eq) if (v > peak) peak = v;
+          magC = peak > 0 && last < peak ? (peak - last) / peak : 0;
+        }
+      } else {
+        // combined minimum DD over full window
+        const agg = new Map<string, number>();
+        let init = 0;
+        for (const k of Object.keys(accounts)) {
+          const m = accounts[k]!;
+          init += ensureNumber(m.initial_balance, 0);
+          for (const r of m.daily ?? []) {
+            agg.set(
+              r.day,
+              ensureNumber(agg.get(r.day), 0) + ensureNumber(r.net_pnl, 0)
+            );
+          }
+        }
+        const days = Array.from(agg.keys()).sort();
+        const eq: number[] = [init];
+        let bal = init;
+        for (const d of days) {
+          bal += ensureNumber(agg.get(d), 0);
+          eq.push(bal);
+        }
+        eq[eq.length - 1] =
+          eq[eq.length - 1]! + ensureNumber(combinedUpnlDelta, 0);
+        magC = minDrawdownMagnitudeFromEquity(eq);
+      }
 
       let idxC = -1;
       for (let i = 0; i < mags.length; i += 1) {
@@ -513,6 +653,8 @@ export default function CombinedDrawdownCard({
     combinedLabel,
     sortMode,
     drawdownMode,
+    monthsInRange,
+    monthMode,
   ]);
 
   const maxData = React.useMemo(
@@ -577,74 +719,98 @@ export default function CombinedDrawdownCard({
   const chartHeight =
     rowCount * (barSize + gapY) + topMargin + bottomMargin + 4;
 
-  const modeLabel: "Monthly" | "Current" | "Minimum" =
+  const contextLabel =
     drawdownMode === "monthly"
-      ? "Monthly"
+      ? monthMode === "worst"
+        ? "worst month"
+        : monthLabel(monthMode.slice(2))
       : drawdownMode === "current"
-        ? "Current"
-        : "Minimum";
+        ? "current"
+        : "minimum (window)";
 
   return (
     <Card className="w-full">
-      <CardHeader className="pb-2 border-b">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="min-w-0">
-            <CardTitle>Drawdown Thresholds — Per Account + All</CardTitle>
-            <CardDescription>
+      <CardHeader className="pb-2 border-b space-y-3">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div className="min-w-0 md:max-w-[60%]">
+            <CardTitle className="truncate">
+              Drawdown Thresholds — Per Account + All
+            </CardTitle>
+            <CardDescription className="mt-1">
               {drawdownMode === "monthly"
-                ? "Monthly max drawdown (current calendar month)."
+                ? "Monthly max drawdown (pick a month or show worst across range)."
                 : drawdownMode === "current"
                   ? "Current drawdown (vs last peak)."
-                  : "Minimum drawdown across window."}{" "}
-              Latest point includes live UPNL delta only.
+                  : "Minimum drawdown across the full window."}{" "}
+              Latest point includes live UPNL delta only when applicable.
             </CardDescription>
           </div>
 
-          <div className="flex flex-col items-end gap-2">
-            <div className="flex items-center gap-2">
-              {anyCrossedL1 ? (
-                <span className="inline-flex items-center gap-1 text-sm text-destructive">
-                  <BellRing className="h-4 w-4" />
-                  Alarm (crossed {legendAll[0]!.label})
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1 text-[12px] text-muted-foreground">
-                  <Bell className="h-4 w-4" />
-                  Threshold @ {legendAll[0]!.label}
-                </span>
-              )}
-            </div>
+          <div className="flex flex-wrap items-center gap-2 justify-end">
+            {anyCrossedL1 ? (
+              <span className="inline-flex items-center gap-1 text-sm text-destructive shrink-0">
+                <BellRing className="h-4 w-4" />
+                Alarm (crossed {legendAll[0]!.label})
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-[12px] text-muted-foreground shrink-0">
+                <Bell className="h-4 w-4" />
+                Threshold @ {legendAll[0]!.label}
+              </span>
+            )}
 
-            <div className="flex items-center justify-end gap-3">
-              {upnlAsOf ? (
-                <span className="text-xs text-muted-foreground">
-                  UPNL as of {new Date(upnlAsOf).toLocaleTimeString()}
-                </span>
-              ) : null}
+            {upnlAsOf ? (
+              <span className="text-xs text-muted-foreground shrink-0">
+                UPNL as of {new Date(upnlAsOf).toLocaleTimeString()}
+              </span>
+            ) : null}
 
+            {/* Month selector (only in monthly mode) */}
+            {drawdownMode === "monthly" ? (
               <Select
-                value={sortMode}
-                onValueChange={(v) => setSortMode(v as SortMode)}
+                value={monthMode}
+                onValueChange={(v) => setMonthMode(v as MonthMode)}
               >
-                <SelectTrigger className="h-8 w-[200px]">
-                  <SelectValue placeholder="Sort" />
+                <SelectTrigger className="h-8 min-w-[180px] md:w-[240px]">
+                  <SelectValue placeholder="Month" />
                 </SelectTrigger>
                 <SelectContent align="end">
-                  <SelectItem value="alpha-asc">Alphabetical (A–Z)</SelectItem>
-                  <SelectItem value="alpha-desc">Alphabetical (Z–A)</SelectItem>
-                  <SelectItem value="dd-asc">Drawdown (Ascending)</SelectItem>
-                  <SelectItem value="dd-desc">Drawdown (Descending)</SelectItem>
+                  {monthsInRange.map((mk) => (
+                    <SelectItem key={mk} value={`m:${mk}` as MonthMode}>
+                      {monthLabel(mk)}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="worst">
+                    Across range (worst month)
+                  </SelectItem>
                 </SelectContent>
               </Select>
-            </div>
+            ) : null}
+
+            {/* Sort selector */}
+            <Select
+              value={sortMode}
+              onValueChange={(v) => setSortMode(v as SortMode)}
+            >
+              <SelectTrigger className="h-8 min-w-[180px] md:w-[220px]">
+                <SelectValue placeholder="Sort" />
+              </SelectTrigger>
+              <SelectContent align="end">
+                <SelectItem value="alpha-asc">Alphabetical (A–Z)</SelectItem>
+                <SelectItem value="alpha-desc">Alphabetical (Z–A)</SelectItem>
+                <SelectItem value="dd-asc">Drawdown (Ascending)</SelectItem>
+                <SelectItem value="dd-desc">Drawdown (Descending)</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
-        <div className="mt-2 grid auto-cols-max grid-flow-col gap-2">
+        {/* thresholds + context pill */}
+        <div className="grid auto-cols-max grid-flow-col gap-2 overflow-x-auto pb-1">
           {legendAll.map((it, i) => (
             <span
               key={it.label}
-              className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs cursor-default"
+              className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs cursor-default whitespace-nowrap"
               title={it.label}
             >
               <span
@@ -657,6 +823,9 @@ export default function CombinedDrawdownCard({
               </span>
             </span>
           ))}
+          <span className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs cursor-default whitespace-nowrap">
+            <span className="text-muted-foreground">View: {contextLabel}</span>
+          </span>
         </div>
       </CardHeader>
 
@@ -721,7 +890,7 @@ export default function CombinedDrawdownCard({
                     payload={payload as unknown[]}
                     legend={legendAll}
                     mags={mags}
-                    modeLabel={modeLabel}
+                    modeLabel={contextLabel}
                   />
                 )}
               />

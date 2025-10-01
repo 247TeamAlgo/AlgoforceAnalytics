@@ -496,7 +496,7 @@ function recomputeFromDaily(
 
   // Equity level across the window (do NOT reset across months here).
   const eq = equityFromDaily(initial, daily);
-
+  console.log(eq)
   // MTD drawdown magnitude (peak resets each month).
   const drawdown_mag = currentMonthDrawdownMagnitude(daily, eq);
 

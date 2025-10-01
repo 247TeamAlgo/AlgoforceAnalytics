@@ -77,8 +77,9 @@ async function fetchAccountsSafe(): Promise<Account[]> {
 async function fetchHeavy(
   accounts: string[],
   range: { start?: string; end?: string },
-  earliest: boolean
-): Promise<HeavyResponse> {
+  earliest: boolean,
+  includeUpnl: boolean // ← only request UPNL when needed
+): Promise<HeavyResponse | null> {
   const params = new URLSearchParams();
   if (accounts.length > 0) params.set("accounts", accounts.join(","));
 
@@ -90,15 +91,22 @@ async function fetchHeavy(
     params.set("earliest", "true");
     params.set("endDate", range.end);
   }
-  // Align with backend boundary (your code uses 8)
   params.set("dayStartHour", "0");
 
-  // Ask server to include baseline live snapshot (for delta computation)
-  params.set("includeUpnl", "1");
+  if (includeUpnl) params.set("includeUpnl", "1");
 
   const url = `/api/v1/1-performance_metrics?${params.toString()}`;
   const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Heavy fetch ${res.status} ${res.statusText}`);
+
+  // IMPORTANT: handle 304 (Not Modified) as a "keep current data"
+  if (res.status === 304) {
+    return null;
+  }
+
+  if (!res.ok) {
+    throw new Error(`Heavy fetch ${res.status} ${res.statusText}`);
+  }
+
   return (await res.json()) as HeavyResponse;
 }
 
@@ -163,19 +171,28 @@ export function useAnalyticsData(): AnalyticsData {
     const hasExplicitRange = Boolean(range.start && range.end);
     if (!hasExplicitRange && !(earliest && range.end)) return;
 
+    // Only include UPNL in heavy results if the selected end is today
+    const endIsToday =
+      !!range.end && range.end === toISODateLocal(new Date());
+
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchHeavy(selected, range, earliest);
-      setRawJson(data);
+      const data = await fetchHeavy(selected, range, earliest, endIsToday);
 
-      if (Array.isArray(data.accounts) && data.accounts.length > 0) {
-        setAccounts(normalizeAccounts(data.accounts));
+      // If 304 Not Modified, data === null -> KEEP existing rawJson
+      if (data) {
+        setRawJson(data);
+        // optionally refresh accounts if backend ever returns them
+        // if (Array.isArray((data as any).accounts) && (data as any).accounts.length > 0) {
+        //   setAccounts(normalizeAccounts((data as any).accounts));
+        // }
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to build metrics";
       setError(msg);
-      setRawJson(null);
+      // DO NOT clear rawJson here — keep last good snapshot visible
+      // setRawJson(null);
     } finally {
       setLoading(false);
     }
@@ -203,7 +220,7 @@ export function useAnalyticsData(): AnalyticsData {
   });
 
   const liveSource: LiveUpnl | undefined = upnlData ?? rawJson?.live_upnl;
-  const baseline: LiveUpnl | undefined = rawJson?.live_upnl; // for drawdown delta
+  const baseline: LiveUpnl | undefined = rawJson?.live_upnl; // may be undefined when includeUpnl=false
 
   /* -------- absolute overlays (legacy) -------- */
   const upnlMap = useMemo<Record<string, number>>(() => {
@@ -252,29 +269,40 @@ export function useAnalyticsData(): AnalyticsData {
 
   /* -------- delta overlays for drawdown only (avoid double-count) -------- */
   const upnlDeltaMapForDrawdown = useMemo<Record<string, number>>(() => {
-    if (!baseline || !liveSource) return {}; // inject zero if no baseline or no live
-    const delta: Record<string, number> = {};
+    if (!liveSource) return {};
     const nowMap = liveSource.per_account_upnl ?? {};
-    const baseMap = baseline.per_account_upnl ?? {};
+    const baseMap = baseline?.per_account_upnl ?? null;
+
     const keys = new Set<string>([
       ...Object.keys(nowMap),
-      ...Object.keys(baseMap),
+      ...(baseMap ? Object.keys(baseMap) : []),
     ]);
+
+    const out: Record<string, number> = {};
     for (const k of keys) {
       const now = Number((nowMap as Record<string, unknown>)[k] ?? 0);
-      const base = Number((baseMap as Record<string, unknown>)[k] ?? 0);
-      const d = now - base;
-      delta[k] = Number.isFinite(d) ? d : 0;
+      if (baseMap) {
+        const base = Number((baseMap as Record<string, unknown>)[k] ?? 0);
+        const d = now - base;
+        out[k] = Number.isFinite(d) ? d : 0;
+      } else {
+        // No baseline (heavy called without includeUpnl) → use absolute live as delta.
+        out[k] = Number.isFinite(now) ? now : 0;
+      }
     }
-    return delta;
+    return out;
   }, [baseline, liveSource]);
 
   const combinedUpnlDeltaForDrawdown = useMemo<number | undefined>(() => {
-    if (!baseline || !liveSource) return 0;
+    if (!liveSource) return 0;
     const now = Number(liveSource.combined_upnl ?? 0);
-    const base = Number(baseline.combined_upnl ?? 0);
-    const d = now - base;
-    return Number.isFinite(d) ? d : 0;
+    const baseMaybe = baseline?.combined_upnl;
+    if (typeof baseMaybe === "number" && Number.isFinite(baseMaybe)) {
+      const d = now - baseMaybe;
+      return Number.isFinite(d) ? d : 0;
+    }
+    // No baseline → absolute live as delta
+    return Number.isFinite(now) ? now : 0;
   }, [baseline, liveSource]);
 
   /* ---------------- reduce heavy payloads ---------------- */
