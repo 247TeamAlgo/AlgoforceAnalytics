@@ -5,7 +5,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 /* ----------------------------- response types ----------------------------- */
 export interface UpnlResponse {
   as_of: string; // ISO instant
-  accounts: string[];
   combined_upnl: number;
   per_account_upnl: Record<string, number>;
   combined_symbol_upnl?: Record<string, number>;
@@ -54,7 +53,10 @@ export function useUpnl(
     setLoading(true);
     setError(null);
     try {
-      const url = `/api/v1/upnl?accounts=${encodeURIComponent(accountsParam)}&includeBreakdown=1`;
+      // Python backend proxy (relative path recommended to avoid CORS)
+      const url = `/api/upnl?accounts=${encodeURIComponent(
+        accountsParam
+      )}&includeBreakdown=1`;
       const res = await fetch(url, { cache: "no-store", signal: ctl.signal });
       if (!res.ok) throw new Error(`UPNL HTTP ${res.status} ${res.statusText}`);
       const payload = (await res.json()) as UpnlResponse;

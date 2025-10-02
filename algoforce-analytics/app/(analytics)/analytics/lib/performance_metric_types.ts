@@ -56,7 +56,7 @@ export type Account = {
   monitored?: boolean;
   /** Optional identifiers used server-side; harmless on client. */
   binanceName?: string;
-  dbName?: string;
+  dbName?: string | null;
 };
 
 /* ----------------------------- streaks (UI) ------------------------------ */

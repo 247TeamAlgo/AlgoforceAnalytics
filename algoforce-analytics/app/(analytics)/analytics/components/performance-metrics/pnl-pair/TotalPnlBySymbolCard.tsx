@@ -29,8 +29,8 @@ export default function TotalPnlBySymbolCard({
 
   return (
     <RankedBarCard<Bucket>
-      title="Total Net PnL — Symbols"
-      description="Realized PnL (overlay shows live UPNL)"
+      title="Symbol Net PnL"
+      description=""
       rows={rows}
       idKey="label"
       label={(r) => r.label}

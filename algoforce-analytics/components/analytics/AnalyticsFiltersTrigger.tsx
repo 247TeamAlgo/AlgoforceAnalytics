@@ -1,3 +1,4 @@
+// app/(analytics)/analytics/components/AnalyticsFiltersTrigger.tsx
 "use client";
 
 import { useMemo, useState } from "react";
@@ -21,10 +22,19 @@ import DateRangePicker from "@/app/(analytics)/analytics/components/DateRangePic
 import { displayName } from "@/app/(analytics)/analytics/lib/performance_metric_types";
 import { usePrefs } from "../prefs/PrefsContext";
 
+/* -------- mount helper to avoid SSR text mismatches -------- */
+function useMounted(): boolean {
+  const [m, setM] = useState(false);
+  useState(() =>
+    typeof window !== "undefined" ? setTimeout(() => setM(true), 0) : null
+  );
+  return m;
+}
+
 /* -------- local date formatters (aligned with DateRangePicker) -------- */
 function fromISODateLocal(s?: string): Date | undefined {
   if (!s) return undefined;
-  const [y, m, d] = s.split("-").map((x) => Number(x));
+  const [y, m, d] = s.split("-").map(Number);
   if (!y || !m || !d) return undefined;
   return new Date(y, m - 1, d, 0, 0, 0, 0);
 }
@@ -45,6 +55,8 @@ function rangeLabel(earliest: boolean, start?: string, end?: string): string {
 /* --------------------------------------------------------------------- */
 
 export function AnalyticsFiltersTrigger() {
+  const mounted = useMounted();
+
   const {
     analyticsAccounts: accounts,
     analyticsSelectedAccounts: selected,
@@ -61,9 +73,12 @@ export function AnalyticsFiltersTrigger() {
 
   const selectedSet = useMemo(() => new Set<string>(selected), [selected]);
 
+  // During SSR (mounted === false), freeze to empty list so server & client markup match
+  const safeAccounts = useMemo(() => (mounted ? accounts : []), [mounted, accounts]);
+
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
-    const list = Array.isArray(accounts) ? accounts : [];
+    const list = Array.isArray(safeAccounts) ? safeAccounts : [];
     const monitored = list.filter((a) => Boolean(a?.monitored));
     const rest = list.filter((a) => !a?.monitored);
     const ordered = monitored.concat(rest);
@@ -72,7 +87,7 @@ export function AnalyticsFiltersTrigger() {
       const label = `${a.redisName} ${a.display ?? ""}`.toLowerCase();
       return label.includes(term);
     });
-  }, [accounts, q]);
+  }, [safeAccounts, q]);
 
   const onToggle = (id: string): void => {
     if (selectedSet.has(id)) {
@@ -82,10 +97,15 @@ export function AnalyticsFiltersTrigger() {
     }
   };
 
-  const selectAll = (): void => setSelected(accounts.map((a) => a.redisName));
+  const selectAll = (): void =>
+    setSelected((safeAccounts ?? []).map((a) => a.redisName));
   const clearAll = (): void => setSelected([]);
 
-  const disabled = loading || accounts.length === 0;
+  const disabled = loading || (safeAccounts?.length ?? 0) === 0;
+
+  const labelText = mounted
+    ? rangeLabel(earliest, range.start, range.end)
+    : "MTD";
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -97,11 +117,13 @@ export function AnalyticsFiltersTrigger() {
           aria-label="Open analytics filters"
         >
           <CalendarIcon className="h-4 w-4" aria-hidden />
-          <span className="hidden sm:inline">
-            {rangeLabel(earliest, range.start, range.end)}
+          <span className="hidden sm:inline" suppressHydrationWarning>
+            {labelText}
           </span>
           <Badge variant="secondary" className="ml-1">
-            {selected.length}/{accounts.length}
+            <span suppressHydrationWarning>
+              {mounted ? `${selected.length}/${safeAccounts.length}` : "—"}
+            </span>
           </Badge>
           <FilterIcon className="h-4 w-4 sm:ml-1" aria-hidden />
         </Button>
@@ -110,18 +132,23 @@ export function AnalyticsFiltersTrigger() {
       <SheetContent side="right" className="w-full sm:w-[560px]">
         <SheetHeader className="text-left">
           <SheetTitle>Analytics Filters</SheetTitle>
-          <SheetDescription>
-            Choose a date range and which accounts to include in analytics.
+          <SheetDescription suppressHydrationWarning>
+            {mounted
+              ? `Range: ${rangeLabel(earliest, range.start, range.end)}`
+              : "Range: MTD"}
           </SheetDescription>
         </SheetHeader>
 
         <div className="mt-4 space-y-4">
-          {/* Date range */}
+          {/* Date range (optional: disabled since backend is MTD-only) */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <div className="font-medium">Date range</div>
-              <div className="text-sm text-muted-foreground">
-                {rangeLabel(earliest, range.start, range.end)}
+              <div
+                className="text-sm text-muted-foreground"
+                suppressHydrationWarning
+              >
+                {labelText}
               </div>
             </div>
             <DateRangePicker
@@ -129,7 +156,7 @@ export function AnalyticsFiltersTrigger() {
               onChange={setRange}
               earliest={earliest}
               onToggleEarliest={setEarliest}
-              disabled={disabled}
+              disabled
               className="w-full"
             />
           </div>
@@ -141,8 +168,12 @@ export function AnalyticsFiltersTrigger() {
             <div className="flex items-center justify-between">
               <div className="font-medium">
                 Accounts{" "}
-                <span className="text-muted-foreground font-normal">
-                  ({selected.length}/{accounts.length})
+                <span
+                  className="text-muted-foreground font-normal"
+                  suppressHydrationWarning
+                >
+                  ({mounted ? `${selected.length}/${safeAccounts.length}` : "—"}
+                  )
                 </span>
               </div>
               <div className="flex items-center gap-2">
@@ -210,7 +241,7 @@ export function AnalyticsFiltersTrigger() {
                 })}
                 {filtered.length === 0 ? (
                   <div className="text-sm text-muted-foreground p-2">
-                    No accounts match your search.
+                    No accounts.
                   </div>
                 ) : null}
               </div>

@@ -33,7 +33,7 @@ export function Navbar() {
         </Link>
 
         {/* Always-visible range summary */}
-        <RangeBadge />
+        {/* <RangeBadge /> */}
 
         <div className="ml-auto flex items-center gap-2">
           {/* Modal triggers */}

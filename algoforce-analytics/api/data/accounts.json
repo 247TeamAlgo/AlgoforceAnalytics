@@ -5,9 +5,7 @@
     "dbName": "POSEIDON",
     "strategy": "Janus",
     "leverage": 5,
-    "monitored": false,
-    "createdAt": "2025-09-06T15:31:07.241Z",
-    "updatedAt": "2025-09-06T17:22:09.301Z"
+    "monitored": false
   },
   {
     "binanceName": "algoforce3",
@@ -15,9 +13,7 @@
     "dbName": "TITAN",
     "strategy": "None",
     "leverage": 5,
-    "monitored": false,
-    "createdAt": "2025-09-06T15:31:07.241Z",
-    "updatedAt": "2025-09-06T15:31:07.241Z"
+    "monitored": false
   },
   {
     "binanceName": "algoforce1",
@@ -25,9 +21,7 @@
     "dbName": "ATLAS",
     "strategy": "Charm",
     "leverage": 10,
-    "monitored": true,
-    "createdAt": "2025-09-06T15:31:07.241Z",
-    "updatedAt": "2025-09-06T15:31:07.241Z"
+    "monitored": true
   },
   {
     "binanceName": "mirrorx1",
@@ -35,9 +29,7 @@
     "dbName": "mirrorx1",
     "strategy": "Janus",
     "leverage": 10,
-    "monitored": true,
-    "createdAt": "2025-09-06T15:31:07.241Z",
-    "updatedAt": "2025-09-06T15:31:07.241Z"
+    "monitored": true
   },
   {
     "binanceName": "fund3",
@@ -45,9 +37,7 @@
     "dbName": "HERA",
     "strategy": "Charm",
     "leverage": 2,
-    "monitored": true,
-    "createdAt": "2025-09-06T15:31:07.241Z",
-    "updatedAt": "2025-09-06T15:31:07.241Z"
+    "monitored": true
   },
   {
     "binanceName": "algoforce5",
@@ -55,9 +45,7 @@
     "dbName": "HYPERION",
     "strategy": "Janus",
     "leverage": 10,
-    "monitored": true,
-    "createdAt": "2025-09-06T15:31:07.241Z",
-    "updatedAt": "2025-09-06T15:31:07.241Z"
+    "monitored": true
   },
   {
     "binanceName": "mirrorx2",
@@ -65,9 +53,7 @@
     "dbName": "PRO",
     "strategy": "Janus",
     "leverage": 10,
-    "monitored": true,
-    "createdAt": "2025-09-06T15:31:07.241Z",
-    "updatedAt": "2025-09-06T15:31:07.241Z"
+    "monitored": true
   },
   {
     "binanceName": "office",
@@ -75,9 +61,7 @@
     "dbName": "PRO",
     "strategy": "Janus",
     "leverage": 10,
-    "monitored": true,
-    "createdAt": "2025-09-06T15:31:07.241Z",
-    "updatedAt": "2025-09-06T15:31:07.241Z"
+    "monitored": true
   },
   {
     "binanceName": "fund2",
@@ -85,9 +69,7 @@
     "dbName": "TITAN",
     "strategy": "Janus",
     "leverage": 2,
-    "monitored": true,
-    "createdAt": "2025-09-06T15:31:07.241Z",
-    "updatedAt": "2025-09-06T15:31:07.241Z"
+    "monitored": true
   },
   {
     "binanceName": "mirrorx4",
@@ -95,9 +77,7 @@
     "dbName": "ZEUS",
     "strategy": "Charm",
     "leverage": 10,
-    "monitored": true,
-    "createdAt": "2025-09-06T15:31:07.241Z",
-    "updatedAt": "2025-09-06T15:31:07.241Z"
+    "monitored": true
   },
   {
     "binanceName": "team",
@@ -105,9 +85,7 @@
     "dbName": "ZEUS",
     "strategy": "Charm",
     "leverage": 10,
-    "monitored": true,
-    "createdAt": "2025-09-06T15:31:07.241Z",
-    "updatedAt": "2025-09-06T15:31:07.241Z"
+    "monitored": true
   },
   {
     "binanceName": "mirrorx3",
@@ -115,8 +93,6 @@
     "dbName": "ZEUS",
     "strategy": "Charm",
     "leverage": 10,
-    "monitored": true,
-    "createdAt": "2025-09-06T15:31:07.241Z",
-    "updatedAt": "2025-09-06T15:31:07.241Z"
+    "monitored": true
   }
 ]

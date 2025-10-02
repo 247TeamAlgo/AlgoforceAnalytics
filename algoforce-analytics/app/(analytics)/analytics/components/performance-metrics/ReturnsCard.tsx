@@ -157,7 +157,7 @@ export default function ReturnsCard({
   title?: string;
   subtitle?: string;
 }) {
-  const daily = merged?.daily ?? [];
+  const daily = merged?.daily;
   const monthsInRange = React.useMemo(() => {
     const set = new Set<string>();
     for (const r of daily) set.add(monthKey(r.day));
@@ -197,7 +197,8 @@ export default function ReturnsCard({
       return compoundedReturnAcrossRange(init, d, combinedLiveDelta);
     } else {
       const mkey = mode.slice(2); // YYYY-MM
-      const liveForThisMonth = mkey === lastMonthInRange ? combinedLiveDelta : 0;
+      const liveForThisMonth =
+        mkey === lastMonthInRange ? combinedLiveDelta : 0;
       return monthReturnPct(init, d, mkey, liveForThisMonth);
     }
   }, [merged, mode, combinedLiveDelta, lastMonthInRange]);
@@ -217,7 +218,9 @@ export default function ReturnsCard({
       } else {
         const mkey = mode.slice(2);
         // only include live on the last month this account actually has
-        const accMonths = Array.from(new Set(d.map((r) => monthKey(r.day)))).sort();
+        const accMonths = Array.from(
+          new Set(d.map((r) => monthKey(r.day)))
+        ).sort();
         const accLastMonth = accMonths[accMonths.length - 1];
         const liveForThisMonth = mkey === accLastMonth ? liveDelta : 0;
         return { key: k, pct: monthReturnPct(init, d, mkey, liveForThisMonth) };
@@ -250,7 +253,9 @@ export default function ReturnsCard({
                   {monthLabel(mk)}
                 </SelectItem>
               ))}
-              <SelectItem value="compounded">Compounded across range</SelectItem>
+              <SelectItem value="compounded">
+                Compounded across range
+              </SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -281,7 +286,9 @@ export default function ReturnsCard({
             <div className="relative h-8 rounded-full bg-secondary/50 overflow-hidden">
               <div
                 className={`absolute inset-y-0 ${
-                  combinedPct && combinedPct < 0 ? "bg-destructive/80" : "bg-primary/70"
+                  combinedPct && combinedPct < 0
+                    ? "bg-destructive/80"
+                    : "bg-primary/70"
                 }`}
                 style={{ width: pctToBarWidth(combinedPct) }}
               />
@@ -293,12 +300,17 @@ export default function ReturnsCard({
 
           {/* Per-account */}
           {perRows.map((row) => (
-            <div key={row.key} className="grid grid-cols-[140px_1fr] items-center gap-3">
+            <div
+              key={row.key}
+              className="grid grid-cols-[140px_1fr] items-center gap-3"
+            >
               <div className="text-sm text-muted-foreground">{row.key}</div>
               <div className="relative h-8 rounded-full bg-secondary/50 overflow-hidden">
                 <div
                   className={`absolute inset-y-0 ${
-                    row.pct && row.pct < 0 ? "bg-destructive/80" : "bg-primary/70"
+                    row.pct && row.pct < 0
+                      ? "bg-destructive/80"
+                      : "bg-primary/70"
                   }`}
                   style={{ width: pctToBarWidth(row.pct) }}
                 />
@@ -313,7 +325,7 @@ export default function ReturnsCard({
         <div className="mt-3 grid grid-cols-5 text-[11px] text-muted-foreground">
           <div className="text-left">-5.00%</div>
           <div className="text-left">-2.5%</div>
-          <div className="text-center">+0.00%</div>
+          <div className="text-center">0.00%</div>
           <div className="text-right">+2.5%</div>
           <div className="text-right">+5.00%</div>
         </div>

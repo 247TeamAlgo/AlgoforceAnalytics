@@ -177,37 +177,6 @@ export default function LiveUpnlStrip({
   }, [combined, perAccount, selected]);
 
   const fresh = freshnessMeta(upnlAsOf);
-
-  // Selected-only analytics (richer summary)
-  const selectedRows = React.useMemo(
-    () => allRows.filter((r) => r.isSelected),
-    [allRows]
-  );
-  const pos = React.useMemo(
-    () => selectedRows.filter((r) => r.v > 0),
-    [selectedRows]
-  );
-  const neg = React.useMemo(
-    () => selectedRows.filter((r) => r.v < 0),
-    [selectedRows]
-  );
-  const posSum = React.useMemo(
-    () => pos.reduce((acc, r) => acc + r.v, 0),
-    [pos]
-  );
-  const negSum = React.useMemo(
-    () => neg.reduce((acc, r) => acc + r.v, 0),
-    [neg]
-  );
-  const topGainer = React.useMemo(
-    () => (pos.length ? pos.slice().sort((a, b) => b.v - a.v)[0] : undefined),
-    [pos]
-  );
-  const topLoser = React.useMemo(
-    () => (neg.length ? neg.slice().sort((a, b) => a.v - b.v)[0] : undefined),
-    [neg]
-  );
-
   return (
     <Card className="p-4 sm:p-5 flex flex-col gap-3 rounded-xl border shadow-sm">
       {/* Top row: Combined + freshness + ordered summary (Selected is last) */}
@@ -231,7 +200,7 @@ export default function LiveUpnlStrip({
             >
               {fmtUsd(combinedSelected ?? null)}
             </span>
-            <span className="text-xs text-muted-foreground">UPNL</span>
+            <span className="text-xs text-muted-foreground">Unrealized PnL</span>
           </div>
 
           {/* Freshness pill with relative + absolute time and timezone */}
@@ -253,61 +222,6 @@ export default function LiveUpnlStrip({
                 {fresh.tz ? ` • ${fresh.tz}` : ""}
               </span>
             ) : null}
-          </span>
-        </div>
-
-        {/* Right: summary badges in required order, with Selected LAST */}
-        <div className="grid grid-cols-2 md:flex md:flex-wrap md:items-center gap-2 text-xs">
-          {/* Positive */}
-          <span
-            className="inline-flex items-center gap-1 rounded-md border px-2 py-1"
-            title={`Positive (selected): ${pos.length}`}
-          >
-            <TrendingUp className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-            <span className="font-medium">{pos.length}</span>
-            <span className="text-muted-foreground">({fmtUsd(posSum)})</span>
-          </span>
-
-          {/* Negative */}
-          <span
-            className="inline-flex items-center gap-1 rounded-md border px-2 py-1"
-            title={`Negative (selected): ${neg.length}`}
-          >
-            <TrendingDown className="h-3.5 w-3.5 text-red-600 dark:text-red-400" />
-            <span className="font-medium">{neg.length}</span>
-            <span className="text-muted-foreground">({fmtUsd(negSum)})</span>
-          </span>
-
-          {/* Top gainer */}
-          {topGainer ? (
-            <span
-              className="inline-flex items-center gap-1 rounded-md border px-2 py-1"
-              title={`Top gainer (selected): ${topGainer.label}`}
-            >
-              <ArrowUpRight className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-              <span className="truncate max-w-[160px]">{topGainer.label}</span>
-              <span className="font-medium">{fmtUsd(topGainer.v)}</span>
-            </span>
-          ) : null}
-
-          {/* Top loser */}
-          {topLoser ? (
-            <span
-              className="inline-flex items-center gap-1 rounded-md border px-2 py-1"
-              title={`Top loser (selected): ${topLoser.label}`}
-            >
-              <ArrowDownRight className="h-3.5 w-3.5 text-red-600 dark:text-red-400" />
-              <span className="truncate max-w-[160px]">{topLoser.label}</span>
-              <span className="font-medium">{fmtUsd(topLoser.v)}</span>
-            </span>
-          ) : null}
-
-          {/* Selected — MUST be last */}
-          <span className="inline-flex items-center gap-1 rounded-md border px-2 py-1">
-            <span className="font-medium">Selected</span>
-            <span className="text-muted-foreground">
-              {selected.length}/{accounts.length}
-            </span>
           </span>
         </div>
       </div>

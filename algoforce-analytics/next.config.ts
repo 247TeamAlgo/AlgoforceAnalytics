@@ -1,20 +1,27 @@
 import type { NextConfig } from "next";
 
-const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
+const API_BASE_URL: string = process.env.API_BASE_URL ?? "http://127.0.0.1:8001";
 
 const config: NextConfig = {
   experimental: {
     serverActions: {
-      // If empty, default same-origin rules apply.
-      allowedOrigins: allowedOrigins.length ? allowedOrigins : undefined,
+      allowedOrigins: (process.env.ALLOWED_ORIGINS ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean) || undefined,
     },
   },
-  // Recommended for Docker/self-host
   output: "standalone",
   devIndicators: false,
+  async rewrites() {
+    return {
+      beforeFiles: [
+        { source: "/api/:path*", destination: `${API_BASE_URL}/api/:path*` },
+      ],
+      afterFiles: [],
+      fallback: [],
+    };
+  },
 };
 
 export default config;

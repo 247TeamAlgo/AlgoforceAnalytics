@@ -4,33 +4,50 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useUpnl } from "./useUpnl";
 import { Account } from "@/lib/jsonStore";
-import {
-  HeavyResponse,
-  MetricsSlim,
-  LiveUpnl,
-} from "../lib/performance_metric_types";
+import type { MetricsSlim, LiveUpnl } from "../lib/performance_metric_types";
 
-export interface DateRange {
-  start?: string; // "YYYY-MM-DD"
-  end?: string; // "YYYY-MM-DD"
-}
+/* ---------------- bulk payload types (match Python backend) ---------------- */
+type BulkWindow = { startDay: string; endDay: string; mode: "MTD" | string };
+type BalanceRow = Record<string, number>; // includes "total"
+type BalanceMap = Record<string, BalanceRow>;
+type Triple = Record<string, number> & { total: number };
+
+export type BulkMetricsResponse = {
+  window: BulkWindow;
+  accounts: string[]; // backend-echo of filtered accounts
+  returns: Record<string, Record<string, number>>; // day -> {accs..., total}
+  balance: BalanceMap; // day -> {accs..., total}
+  combinedLiveMonthlyReturn: Triple; // {accs..., total}
+  combinedLiveMonthlyDrawdown: Triple; // {accs..., total}
+  losingStreak?: {
+    perAccount?: Record<string, { currentStreak?: number; maxStreak?: number }>;
+    combined?: { currentStreak?: number; maxStreak?: number };
+    daily?: { combined?: Record<string, number> };
+  };
+  symbolPnL?: {
+    symbols?: Record<string, Record<string, number> & { TOTAL?: number }>; // sym -> {accs..., TOTAL}
+    totalPerAccount?: Record<string, number>;
+  };
+  // NOTE: uPnl is intentionally NOT included in bulk anymore.
+};
 
 export interface AnalyticsData {
   accounts: Account[];
   selected: string[];
   setSelected: React.Dispatch<React.SetStateAction<string[]>>;
-  range: DateRange;
-  setRange: React.Dispatch<React.SetStateAction<DateRange>>;
-  earliest: boolean;
-  setEarliest: React.Dispatch<React.SetStateAction<boolean>>;
+
   loading: boolean;
   error: string | null;
-  rawJson: HeavyResponse | null;
-  merged: MetricsSlim | null;
-  perAccounts?: Record<string, MetricsSlim>;
+
+  bulk: BulkMetricsResponse | null; // raw BULK (MTD) for selected
+
+  // Shims for existing cards:
+  mergedForSymbols: MetricsSlim | null; // only uses pnl_per_symbol[]
+  perAccountsForStreaks?: Record<string, MetricsSlim>; // uses streaks.{current,max}
+
   onAutoFetch: () => Promise<void>;
 
-  // Legacy absolute live overlays (used by strips/tables etc.)
+  // Live overlays (polled independently; filtered by selected)
   upnlMap: Record<string, number>;
   combinedUpnl?: number;
   upnlAsOf?: string;
@@ -38,9 +55,8 @@ export interface AnalyticsData {
   upnlError: string | null;
   refetchUpnl: () => Promise<void>;
   upnlSymbolMap?: Record<string, number>;
-  upnlSymbolPerAccount?: Record<string, Record<string, number>>;
 
-  // Delta (computed against heavy baseline) — used by drawdown card ONLY.
+  // Kept for compatibility (not used by CombinedMonthlyDrawdownCard)
   upnlDeltaMapForDrawdown: Record<string, number>;
   combinedUpnlDeltaForDrawdown?: number;
 }
@@ -56,12 +72,6 @@ function normalizeAccounts(v: unknown): Account[] {
   if (!Array.isArray(v)) return [];
   return v.filter(isAccountLike);
 }
-function pad2(n: number): string {
-  return n < 10 ? `0${n}` : String(n);
-}
-function toISODateLocal(d: Date): string {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
 
 async function fetchAccountsSafe(): Promise<Account[]> {
   try {
@@ -74,54 +84,97 @@ async function fetchAccountsSafe(): Promise<Account[]> {
   }
 }
 
-async function fetchHeavy(
-  accounts: string[],
-  range: { start?: string; end?: string },
-  earliest: boolean,
-  includeUpnl: boolean // ← only request UPNL when needed
-): Promise<HeavyResponse | null> {
+/** Fetch bulk MTD from Next proxy: /api/metrics/bulk?accounts=fund2,fund3 */
+async function fetchBulk(accounts: string[]): Promise<BulkMetricsResponse> {
   const params = new URLSearchParams();
   if (accounts.length > 0) params.set("accounts", accounts.join(","));
-
-  const hasExplicitRange = Boolean(range.start && range.end);
-  if (hasExplicitRange) {
-    params.set("startDate", range.start as string);
-    params.set("endDate", range.end as string);
-  } else if (earliest && range.end) {
-    params.set("earliest", "true");
-    params.set("endDate", range.end);
-  }
-  params.set("dayStartHour", "0");
-
-  if (includeUpnl) params.set("includeUpnl", "1");
-
-  const url = `/api/v1/1-performance_metrics?${params.toString()}`;
+  const url = `/api/metrics/bulk?${params.toString()}`;
   const res = await fetch(url, { cache: "no-store" });
-
-  // IMPORTANT: handle 304 (Not Modified) as a "keep current data"
-  if (res.status === 304) {
-    return null;
-  }
-
-  if (!res.ok) {
-    throw new Error(`Heavy fetch ${res.status} ${res.statusText}`);
-  }
-
-  return (await res.json()) as HeavyResponse;
+  if (!res.ok) throw new Error(`Bulk fetch ${res.status} ${res.statusText}`);
+  return (await res.json()) as BulkMetricsResponse;
 }
 
-export function useAnalyticsData(): AnalyticsData {
-  const [range, setRange] = useState<DateRange>({});
-  const [earliest, setEarliest] = useState<boolean>(false);
+/* ---------------- helpers to adapt bulk → component props ---------------- */
 
+type Bucket = { label: string; total: number };
+
+/** Build symbols list using ONLY selected accounts, ignoring any TOTAL provided. */
+function buildMergedForSymbols(
+  b: BulkMetricsResponse | null,
+  selected: readonly string[]
+): MetricsSlim | null {
+  if (!b?.symbolPnL?.symbols) return null;
+
+  const sel = new Set(selected.length ? selected : b.accounts ?? []);
+  const rows: Bucket[] = [];
+
+  for (const [sym, rec] of Object.entries(b.symbolPnL.symbols)) {
+    let sum = 0;
+    for (const [k, v] of Object.entries(rec)) {
+      if (k === "TOTAL") continue;
+      if (sel.has(k)) {
+        const n = typeof v === "number" ? v : Number(v);
+        if (Number.isFinite(n)) sum += n;
+      }
+    }
+    rows.push({ label: sym, total: Number(sum.toFixed(2)) });
+  }
+
+  return {
+    initial_balance: 0,
+    window_start: b.window?.startDay ?? "",
+    window_end: b.window?.endDay ?? "",
+    total_return_pct_over_window: null,
+    drawdown_mag: 0,
+    streaks: { current: 0, max: 0 },
+    daily: [],
+    pnl_per_symbol: rows,
+    pnl_per_pair: [],
+  };
+}
+
+/** Build a per-account MetricsSlim map containing only streaks (selected only). */
+function buildPerAccountsForStreaks(
+  b: BulkMetricsResponse | null,
+  selected: readonly string[]
+): Record<string, MetricsSlim> | undefined {
+  const src = b?.losingStreak?.perAccount;
+  if (!src) return undefined;
+
+  const sel = new Set(selected.length ? selected : b?.accounts ?? []);
+  const out: Record<string, MetricsSlim> = {};
+
+  for (const [acc, s] of Object.entries(src)) {
+    if (!sel.has(acc)) continue;
+    out[acc] = {
+      initial_balance: 0,
+      window_start: b?.window?.startDay ?? "",
+      window_end: b?.window?.endDay ?? "",
+      total_return_pct_over_window: null,
+      drawdown_mag: 0,
+      streaks: {
+        current: Number(s?.currentStreak ?? 0),
+        max: Number(s?.maxStreak ?? 0),
+      },
+      daily: [],
+      pnl_per_symbol: [],
+      pnl_per_pair: [],
+    };
+  }
+  return out;
+}
+
+/* -------------------------------- main hook -------------------------------- */
+
+export function useAnalyticsData(): AnalyticsData {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
 
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [rawJson, setRawJson] = useState<HeavyResponse | null>(null);
+  const [bulk, setBulk] = useState<BulkMetricsResponse | null>(null);
 
-  // bootstrap
+  // bootstrap: accounts + default selection (from backend!)
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -135,15 +188,6 @@ export function useAnalyticsData(): AnalyticsData {
       setSelected(
         monitored.length > 0 ? monitored : all.map((a) => a.redisName)
       );
-
-      const end = new Date();
-      const start = new Date(
-        end.getFullYear(),
-        end.getMonth(),
-        end.getDate() - 30
-      );
-      setRange({ start: toISODateLocal(start), end: toISODateLocal(end) });
-      setEarliest(false);
     })().catch((e) => {
       if (!alive) return;
       setError(e instanceof Error ? e.message : "Failed to initialize");
@@ -153,7 +197,7 @@ export function useAnalyticsData(): AnalyticsData {
     };
   }, []);
 
-  // ensure non-empty selection
+  // Ensure non-empty selection
   useEffect(() => {
     if (selected.length === 0 && accounts.length > 0) {
       const monitored = accounts
@@ -166,48 +210,34 @@ export function useAnalyticsData(): AnalyticsData {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accounts.length]);
 
+  // Fetch bulk MTD for SELECTED accounts
   const onAutoFetch = useCallback(async (): Promise<void> => {
     if (selected.length === 0) return;
-    const hasExplicitRange = Boolean(range.start && range.end);
-    if (!hasExplicitRange && !(earliest && range.end)) return;
-
-    // Only include UPNL in heavy results if the selected end is today
-    const endIsToday =
-      !!range.end && range.end === toISODateLocal(new Date());
 
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchHeavy(selected, range, earliest, endIsToday);
-
-      // If 304 Not Modified, data === null -> KEEP existing rawJson
-      if (data) {
-        setRawJson(data);
-        // optionally refresh accounts if backend ever returns them
-        // if (Array.isArray((data as any).accounts) && (data as any).accounts.length > 0) {
-        //   setAccounts(normalizeAccounts((data as any).accounts));
-        // }
-      }
+      const data = await fetchBulk(selected);
+      setBulk(data);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to build metrics";
       setError(msg);
-      // DO NOT clear rawJson here — keep last good snapshot visible
-      // setRawJson(null);
     } finally {
       setLoading(false);
     }
-  }, [selected, range, earliest]);
+  }, [selected]);
 
+  // initial + periodic refresh (30 mins)
   useEffect(() => {
     const run = (): void => {
       void onAutoFetch();
     };
-    run();
+    if (selected.length > 0) run();
     const id = window.setInterval(run, 30 * 60 * 1000);
     return () => window.clearInterval(id);
-  }, [onAutoFetch]);
+  }, [onAutoFetch, selected.length]);
 
-  // Legacy live UPNL polling: prefer polled, fallback to heavy snapshot
+  // Live UPNL polling (independent, filtered by selected)
   const {
     data: upnlData,
     loading: upnlLoading,
@@ -219,10 +249,9 @@ export function useAnalyticsData(): AnalyticsData {
     errorBackoffMs: 2_000,
   });
 
-  const liveSource: LiveUpnl | undefined = upnlData ?? rawJson?.live_upnl;
-  const baseline: LiveUpnl | undefined = rawJson?.live_upnl; // may be undefined when includeUpnl=false
+  const liveSource: LiveUpnl | undefined = upnlData;
 
-  /* -------- absolute overlays (legacy) -------- */
+  // absolute overlays
   const upnlMap = useMemo<Record<string, number>>(() => {
     const src = liveSource?.per_account_upnl ?? {};
     const out: Record<string, number> = {};
@@ -239,7 +268,7 @@ export function useAnalyticsData(): AnalyticsData {
     return Number.isFinite(n) ? n : undefined;
   }, [liveSource?.combined_upnl]);
 
-  const upnlAsOf = liveSource?.as_of ?? undefined;
+  const upnlAsOf = liveSource?.as_of ?? undefined; // no bulk fallback by design
 
   const upnlSymbolMap = useMemo<Record<string, number> | undefined>(() => {
     if (!liveSource?.combined_symbol_upnl) return undefined;
@@ -251,86 +280,42 @@ export function useAnalyticsData(): AnalyticsData {
     return out;
   }, [liveSource?.combined_symbol_upnl]);
 
-  const upnlSymbolPerAccount = useMemo<
-    Record<string, Record<string, number>> | undefined
-  >(() => {
-    if (!liveSource?.per_account_symbol_upnl) return undefined;
-    const norm: Record<string, Record<string, number>> = {};
-    for (const [acc, m] of Object.entries(liveSource.per_account_symbol_upnl)) {
-      const row: Record<string, number> = {};
-      for (const [sym, v] of Object.entries(m)) {
-        const n = typeof v === "number" ? v : Number(v);
-        if (Number.isFinite(n)) row[sym] = n;
-      }
-      norm[acc] = row;
-    }
-    return norm;
-  }, [liveSource?.per_account_symbol_upnl]);
-
-  /* -------- delta overlays for drawdown only (avoid double-count) -------- */
+  // Deltas for legacy drawdown usage (not needed by new card, but kept)
   const upnlDeltaMapForDrawdown = useMemo<Record<string, number>>(() => {
-    if (!liveSource) return {};
-    const nowMap = liveSource.per_account_upnl ?? {};
-    const baseMap = baseline?.per_account_upnl ?? null;
-
-    const keys = new Set<string>([
-      ...Object.keys(nowMap),
-      ...(baseMap ? Object.keys(baseMap) : []),
-    ]);
-
     const out: Record<string, number> = {};
-    for (const k of keys) {
-      const now = Number((nowMap as Record<string, unknown>)[k] ?? 0);
-      if (baseMap) {
-        const base = Number((baseMap as Record<string, unknown>)[k] ?? 0);
-        const d = now - base;
-        out[k] = Number.isFinite(d) ? d : 0;
-      } else {
-        // No baseline (heavy called without includeUpnl) → use absolute live as delta.
-        out[k] = Number.isFinite(now) ? now : 0;
-      }
-    }
+    for (const [k, v] of Object.entries(upnlMap)) out[k] = v ?? 0;
     return out;
-  }, [baseline, liveSource]);
+  }, [upnlMap]);
 
   const combinedUpnlDeltaForDrawdown = useMemo<number | undefined>(() => {
-    if (!liveSource) return 0;
-    const now = Number(liveSource.combined_upnl ?? 0);
-    const baseMaybe = baseline?.combined_upnl;
-    if (typeof baseMaybe === "number" && Number.isFinite(baseMaybe)) {
-      const d = now - baseMaybe;
-      return Number.isFinite(d) ? d : 0;
-    }
-    // No baseline → absolute live as delta
-    return Number.isFinite(now) ? now : 0;
-  }, [baseline, liveSource]);
+    return typeof combinedUpnl === "number" ? combinedUpnl : 0;
+  }, [combinedUpnl]);
 
-  /* ---------------- reduce heavy payloads ---------------- */
-  const merged = useMemo<MetricsSlim | null>(
-    () => (rawJson ? rawJson.merged : null),
-    [rawJson]
+  /* ---------------- shims from bulk (respect SELECTED accounts) ---------------- */
+  const mergedForSymbols = useMemo<MetricsSlim | null>(
+    () => buildMergedForSymbols(bulk, selected),
+    [bulk, selected]
   );
-  const perAccounts = useMemo<Record<string, MetricsSlim> | undefined>(
-    () => (rawJson ? rawJson.per_account : undefined),
-    [rawJson]
-  );
+
+  const perAccountsForStreaks = useMemo<
+    Record<string, MetricsSlim> | undefined
+  >(() => buildPerAccountsForStreaks(bulk, selected), [bulk, selected]);
 
   return {
     accounts,
     selected,
     setSelected,
-    range,
-    setRange,
-    earliest,
-    setEarliest,
+
     loading,
     error,
-    rawJson,
-    merged,
-    perAccounts,
+
+    bulk,
+    mergedForSymbols,
+    perAccountsForStreaks,
+
     onAutoFetch,
 
-    // legacy absolute overlays
+    // live
     upnlMap,
     combinedUpnl,
     upnlAsOf,
@@ -338,9 +323,8 @@ export function useAnalyticsData(): AnalyticsData {
     upnlError,
     refetchUpnl,
     upnlSymbolMap,
-    upnlSymbolPerAccount,
 
-    // drawdown-safe deltas
+    // deltas (compat)
     upnlDeltaMapForDrawdown,
     combinedUpnlDeltaForDrawdown,
   };

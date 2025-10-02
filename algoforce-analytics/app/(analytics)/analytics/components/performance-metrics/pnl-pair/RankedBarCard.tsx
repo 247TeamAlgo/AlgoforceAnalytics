@@ -1,6 +1,5 @@
 "use client";
 
-import * as React from "react";
 import {
   Card,
   CardContent,
@@ -9,27 +8,20 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ChartConfig, ChartContainer } from "@/components/ui/chart";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TrendingDown, TrendingUp } from "lucide-react";
+import * as React from "react";
 import {
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
   LabelList,
+  Tooltip as RechartsTooltip,
   ReferenceLine,
   ResponsiveContainer,
-  Tooltip as RechartsTooltip,
   XAxis,
   YAxis,
 } from "recharts";
-import { Sigma, TrendingDown, TrendingUp } from "lucide-react";
 
 /* --------------------------------- types --------------------------------- */
 type ValueFormat = "usd" | "pct" | "num";
@@ -181,7 +173,6 @@ export type RankedBarCardProps<T extends Record<string, unknown>> = {
   clampMode?: ClampMode;
   maxChartHeightPx?: number;
   itemsNoun?: string;
-  /** Live overlay values, keyed by the row id (e.g. symbol). */
   overlayMap?: Record<string, number>;
 };
 
@@ -203,14 +194,10 @@ export default function RankedBarCard<T extends Record<string, unknown>>({
   itemsNoun = "items",
   overlayMap,
 }: RankedBarCardProps<T>) {
-  const [signFilter, setSignFilter] = React.useState<"all" | "pos" | "neg">(
-    initialTab
-  );
-  const [sortMode, setSortMode] = React.useState<SortMode>("pnl-desc");
-  const [wrapRef] = useElementSize<HTMLDivElement>();
+  const [wrapRef, wrapSize] = useElementSize<HTMLDivElement>();
   const isPercent = valueFormat === "pct";
 
-  // Normalize + clamp + overlay
+  // Normalize
   const data: RankedDatum[] = React.useMemo(() => {
     const out: RankedDatum[] = [];
     for (const r of rows) {
@@ -245,44 +232,16 @@ export default function RankedBarCard<T extends Record<string, unknown>>({
     return out;
   }, [rows, idKey, valueKey, label, secondary, clampMode, overlayMap]);
 
-  const filtered: RankedDatum[] = React.useMemo(() => {
-    let list = data;
-    if (signFilter !== "all") list = list.filter((d) => d.sign === signFilter);
-    return [...list].sort((a, b) => {
-      switch (sortMode) {
-        case "alpha-asc":
-          return a.label.localeCompare(b.label, undefined, {
-            sensitivity: "base",
-          });
-        case "alpha-desc":
-          return b.label.localeCompare(a.label, undefined, {
-            sensitivity: "base",
-          });
-        case "pnl-asc":
-          return a.value - b.value;
-        case "pnl-desc":
-        default:
-          return b.value - a.value;
-      }
-    });
-  }, [data, signFilter, sortMode]);
-
-  /* -------- summary / legend chips -------- */
+  /* -------- summary -------- */
   const stats = React.useMemo(() => {
-    if (filtered.length === 0)
-      return {
-        sum: 0,
-        max: null as RankedDatum | null,
-        min: null as RankedDatum | null,
-        posN: 0,
-        negN: 0,
-      };
+    if (data.length === 0)
+      return { sum: 0, max: null, min: null, posN: 0, negN: 0 };
     let sum = 0,
-      max = filtered[0]!,
-      min = filtered[0]!,
+      max = data[0]!,
+      min = data[0]!,
       posN = 0,
       negN = 0;
-    for (const d of filtered) {
+    for (const d of data) {
       sum += d.value;
       if (d.value > max.value) max = d;
       if (d.value < min.value) min = d;
@@ -290,167 +249,100 @@ export default function RankedBarCard<T extends Record<string, unknown>>({
       else if (d.value < 0) negN += 1;
     }
     return { sum, max, min, posN, negN };
-  }, [filtered]);
+  }, [data]);
 
   /* -------- layout, axis, and domain -------- */
-  const rowGapPx = 8;
   const barHeight = barSizePx;
-  const contentHeight = Math.max(
-    64,
-    12 + filtered.length * (barHeight + rowGapPx)
-  );
-  const maxLabelLen = filtered.reduce((m, d) => Math.max(m, d.label.length), 0);
+  const contentHeight = Math.max(64, 12 + data.length * (barHeight + 8));
+  const maxLabelLen = data.reduce((m, d) => Math.max(m, d.label.length), 0);
   const yAxisWidth = Math.max(
     64,
     Math.min(140, Math.round(maxLabelLen * 7.0 + 14))
   );
 
-  const xDomain: [number, number] = React.useMemo(() => {
-    if (filtered.length === 0) return [0, 1];
-    if (clampMode === "nonneg" || clampMode === "zeroTo100") {
-      let max = 0;
-      for (const d of filtered) if (d.value > max) max = d.value;
-      if (clampMode === "zeroTo100") max = Math.min(100, max);
-      const pad = Math.max(isPercent ? 0.2 : 0.5, Math.abs(max) * 0.06);
-      return [0, max + pad];
-    }
-    let min = 0,
-      max = 0;
-    for (const d of filtered) {
+  // Round to hundreds
+  const [domainMin, domainMax] = React.useMemo<[number, number]>(() => {
+    if (data.length === 0) return [0, 100];
+    let min = 0;
+    let max = 0;
+    for (const d of data) {
       if (d.value < min) min = d.value;
       if (d.value > max) max = d.value;
     }
-    if (min === max) {
-      const pad = Math.max(1, Math.abs(max) * 0.2);
-      return [min - pad, max + pad];
-    }
-    const pad = (max - min) * 0.06;
-    return [min - pad, max + pad];
-  }, [filtered, clampMode, isPercent]);
+    const ceilHundreds = (n: number): number => Math.ceil(n / 100) * 100;
+    const floorHundreds = (n: number): number => Math.floor(n / 100) * 100;
 
-  const posMax = Math.max(0, xDomain[1]);
-  const negMin = clampMode === "none" ? Math.min(0, xDomain[0]) : 0;
+    let lo = floorHundreds(min);
+    let hi = ceilHundreds(max);
+    if (lo > 0) lo = 0;
+    if (hi < 0) hi = 0;
+    if (lo === hi) {
+      lo -= 100;
+      hi += 100;
+    }
+    return [lo, hi];
+  }, [data]);
 
   type TrailDatum = RankedDatum & { posTrail: number; negTrail: number };
   const withTrail: TrailDatum[] = React.useMemo(
-    () => filtered.map((d) => ({ ...d, posTrail: posMax, negTrail: negMin })),
-    [filtered, posMax, negMin]
+    () =>
+      data.map((d) => ({
+        ...d,
+        posTrail: Math.max(0, domainMax),
+        negTrail: Math.min(0, domainMin),
+      })),
+    [data, domainMax, domainMin]
   );
 
   const cfg = React.useMemo(() => chartConfigBase, []);
 
-  /* -------- value badge (React element, TS-safe) -------- */
-  const BADGE_FONT_PX = 11;
-  const BADGE_RX = 6;
-  const BADGE_PAD_X = 6;
-  const BADGE_PAD_Y = 3;
+  /* -------- right gutter label -------- */
+  const RIGHT_GUTTER_PX = 140;
+  const VALUE_FONT_PX = 12;
+  const GUTTER_INNER_PAD_PX = 8;
 
-  const ValueBadgeLabel: React.FC<Record<string, unknown>> = (props) => {
-    const num = (v: unknown) =>
-      typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
-    const x = num(props.x),
-      y = num(props.y),
-      width = num(props.width),
-      height = num(props.height),
-      value = num(props.value);
-    if (![x, y, width, height, value].every(Number.isFinite)) return null;
+  type LabelCoreProps = { y?: number; height?: number; value?: number };
 
-    const labelText = formatValue(value, valueFormat, fmtUsd);
-    const textW = Math.ceil(labelText.length * BADGE_FONT_PX * 0.62);
-    const W = textW + BADGE_PAD_X * 2;
-    const H = BADGE_FONT_PX + BADGE_PAD_Y * 2;
+  const RightGutterValueLabel: React.FC<LabelCoreProps> = (props) => {
+    const y = typeof props.y === "number" ? props.y : NaN;
+    const h = typeof props.height === "number" ? props.height : NaN;
+    const value = typeof props.value === "number" ? props.value : NaN;
+    if (![y, h, value].every(Number.isFinite)) return null;
 
-    const isPos = value >= 0;
-    const gapOutside = 8;
-    const hasRoomInside = Math.abs(width) >= W + 6;
-
-    const rectX = isPos
-      ? hasRoomInside
-        ? x + width - W - 4
-        : x + width + gapOutside
-      : hasRoomInside
-        ? x + 4
-        : x - gapOutside - W;
-    const rectY = y + height / 2 - H / 2;
-
-    const accentColor = isPos ? POS_COLOR : NEG_COLOR;
-    const accentX = rectX + (isPos ? 0 : W - 2);
+    const text = formatValue(value, valueFormat, fmtUsd);
+    const tx = Math.max(
+      0,
+      (wrapSize?.width ?? 0) - RIGHT_GUTTER_PX + GUTTER_INNER_PAD_PX
+    );
+    const ty = y + h / 2 + VALUE_FONT_PX * 0.36;
 
     return (
-      <g
-        style={{
-          filter:
-            "drop-shadow(0 1px 0 rgba(0,0,0,0.10)) drop-shadow(0 4px 8px rgba(0,0,0,0.06))",
-          pointerEvents: "none",
-        }}
+      <text
+        x={tx}
+        y={ty}
+        textAnchor="start"
+        fontSize={VALUE_FONT_PX}
+        className="font-semibold"
+        fill="var(--primary)"
       >
-        <rect
-          x={rectX}
-          y={rectY}
-          rx={BADGE_RX}
-          ry={BADGE_RX}
-          width={W}
-          height={H}
-          fill="var(--background)"
-          fillOpacity={0.36}
-          stroke="var(--border)"
-          strokeWidth={1}
-          strokeOpacity={0.38}
-        />
-        <rect
-          x={accentX}
-          y={rectY}
-          width={2}
-          height={H}
-          rx={BADGE_RX}
-          ry={BADGE_RX}
-          fill={accentColor}
-          fillOpacity={0.7}
-        />
-        <text
-          x={rectX + BADGE_PAD_X}
-          y={rectY + H / 2 + BADGE_FONT_PX * 0.36}
-          className="font-semibold"
-          fontSize={BADGE_FONT_PX}
-          fill="var(--foreground)"
-          fillOpacity={0.98}
-        >
-          {labelText}
-        </text>
-      </g>
+        {text}
+      </text>
     );
   };
-
-  const secondarySpec = React.useMemo(
-    () =>
-      secondary.map((s) => ({
-        keyStr: String(s.key),
-        label: s.label,
-        format: s.format,
-      })),
-    [secondary]
-  );
-
-  const leftMargin = 16;
-  const rightMargin = 40;
 
   return (
     <Card className="py-0">
       <CardHeader className="border-b !p-0">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          {/* LEFT: title/desc + stats row */}
           <div className="min-w-0 px-6 pt-4 sm:py-3">
-            <CardTitle className="leading-tight text-foreground">
-              {title}
-            </CardTitle>
+            <CardTitle>{title}</CardTitle>
             {description ? (
               <CardDescription className="mt-0.5">
                 {description}
               </CardDescription>
             ) : null}
-
-            {/* stats + legend chips (with icons) */}
             <div className="mt-2 flex flex-wrap items-center gap-2">
+              {/* Stats row */}
               <span className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs">
                 <span
                   className="h-2.5 w-2.5 rounded-[3px]"
@@ -461,7 +353,6 @@ export default function RankedBarCard<T extends Record<string, unknown>>({
                   {formatValue(stats.sum, valueFormat, fmtUsd)}
                 </span>
               </span>
-
               <span className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs">
                 <span
                   className="h-2.5 w-2.5 rounded-[3px]"
@@ -480,7 +371,6 @@ export default function RankedBarCard<T extends Record<string, unknown>>({
                     : "—"}
                 </span>
               </span>
-
               <span className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs">
                 <span
                   className="h-2.5 w-2.5 rounded-[3px]"
@@ -497,73 +387,6 @@ export default function RankedBarCard<T extends Record<string, unknown>>({
                   {stats.min
                     ? formatValue(stats.min.value, valueFormat, fmtUsd)
                     : "—"}
-                </span>
-              </span>
-
-              <span className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs">
-                <span
-                  className="h-2.5 w-2.5 rounded-[3px]"
-                  style={{ backgroundColor: POS_COLOR }}
-                />
-                <TrendingUp
-                  className="h-3.5 w-3.5"
-                  style={{ color: POS_COLOR }}
-                />
-                <span className="text-muted-foreground">Pos</span>
-                <span className="font-semibold text-foreground">
-                  {stats.posN}
-                </span>
-              </span>
-
-              <span className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs">
-                <span
-                  className="h-2.5 w-2.5 rounded-[3px]"
-                  style={{ backgroundColor: NEG_COLOR }}
-                />
-                <TrendingDown
-                  className="h-3.5 w-3.5"
-                  style={{ color: NEG_COLOR }}
-                />
-                <span className="text-muted-foreground">Neg</span>
-                <span className="font-semibold text-foreground">
-                  {stats.negN}
-                </span>
-              </span>
-            </div>
-          </div>
-
-          {/* RIGHT: sort, tabs, count */}
-          <div className="px-6 pb-3 sm:py-3">
-            <div className="flex flex-wrap items-center gap-3">
-              <Select
-                value={sortMode}
-                onValueChange={(v) => setSortMode(v as SortMode)}
-              >
-                <SelectTrigger className="h-8 w-[200px]">
-                  <SelectValue placeholder="Sort" />
-                </SelectTrigger>
-                <SelectContent align="end">
-                  <SelectItem value="alpha-asc">Alphabetical (A–Z)</SelectItem>
-                  <SelectItem value="alpha-desc">Alphabetical (Z–A)</SelectItem>
-                  <SelectItem value="pnl-asc">Value (Ascending)</SelectItem>
-                  <SelectItem value="pnl-desc">Value (Descending)</SelectItem>
-                </SelectContent>
-              </Select>
-
-              <Tabs
-                value={signFilter}
-                onValueChange={(v) => setSignFilter(v as "all" | "pos" | "neg")}
-              >
-                <TabsList className="h-8">
-                  <TabsTrigger value="all">All</TabsTrigger>
-                  <TabsTrigger value="pos">Pos</TabsTrigger>
-                  <TabsTrigger value="neg">Neg</TabsTrigger>
-                </TabsList>
-              </Tabs>
-
-              <span className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs">
-                <span className="text-muted-foreground">
-                  {filtered.length} {itemsNoun}
                 </span>
               </span>
             </div>
@@ -591,7 +414,12 @@ export default function RankedBarCard<T extends Record<string, unknown>>({
                 <BarChart
                   data={withTrail}
                   layout="vertical"
-                  margin={{ left: 16, right: 40, top: 8, bottom: 8 }}
+                  margin={{
+                    left: 16,
+                    right: RIGHT_GUTTER_PX,
+                    top: 8,
+                    bottom: 8,
+                  }}
                   barCategoryGap="12%"
                   barGap={-barHeight}
                 >
@@ -607,10 +435,7 @@ export default function RankedBarCard<T extends Record<string, unknown>>({
                   />
                   <XAxis
                     type="number"
-                    domain={[
-                      Math.min(0, ...withTrail.map((d) => d.value)),
-                      Math.max(0, ...withTrail.map((d) => d.value)),
-                    ]}
+                    domain={[domainMin, domainMax]}
                     tickFormatter={(v: number) =>
                       formatValue(v, valueFormat, fmtUsd)
                     }
@@ -639,7 +464,7 @@ export default function RankedBarCard<T extends Record<string, unknown>>({
                     }
                   />
 
-                  {/* Trails */}
+                  {/* Foreshadow trails */}
                   <Bar
                     dataKey="negTrail"
                     barSize={barHeight}
@@ -659,7 +484,7 @@ export default function RankedBarCard<T extends Record<string, unknown>>({
                     style={{ pointerEvents: "none" }}
                   />
 
-                  {/* Realized values */}
+                  {/* Actual values */}
                   <Bar
                     dataKey="value"
                     barSize={barHeight}
@@ -679,10 +504,10 @@ export default function RankedBarCard<T extends Record<string, unknown>>({
                         className="transition-opacity duration-200 hover:opacity-90"
                       />
                     ))}
-                    <LabelList content={<ValueBadgeLabel />} />
+                    <LabelList content={<RightGutterValueLabel />} />
                   </Bar>
 
-                  {/* Optional live overlay (thin bar) */}
+                  {/* Optional overlay */}
                   {overlayMap ? (
                     <Bar
                       dataKey="overlay"
