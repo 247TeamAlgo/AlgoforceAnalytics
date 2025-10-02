@@ -227,8 +227,8 @@ export function useAnalyticsData(): AnalyticsData {
       void onAutoFetch();
     };
     if (selected.length > 0) run();
-    // const id = window.setInterval(run, 30 * 60 * 1000);
-    const id = window.setInterval(run, 30 * 1000); // TEST
+    const id = window.setInterval(run, 30 * 60 * 1000);
+    // const id = window.setInterval(run, 60 * 1000); // TEST
     return () => window.clearInterval(id);
   }, [onAutoFetch, selected.length]);
 
