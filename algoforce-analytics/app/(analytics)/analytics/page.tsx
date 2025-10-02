@@ -153,7 +153,7 @@ export default function AnalyticsPage() {
       </section>
 
       {loading ? (
-        <div className="pointer-events-none fixed inset-0 grid place-items-center bg-background/40 backdrop-blur-sm">
+        <div className="pointer-events-none fixed inset-0 z-50 grid place-items-center bg-background/40 backdrop-blur-sm">
           <div className="glass-card px-4 py-3 rounded-xl shadow-lg border flex items-center gap-3">
             <Loader2 className="h-5 w-5 animate-spin" />
             <span className="text-sm">Loading charts…</span>
