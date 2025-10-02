@@ -1,6 +1,6 @@
 "use server";
 
-import { updateAccount, type Account } from "@/lib/jsonStore";
+import { type Account } from "@/lib/jsonStore";
 
 export async function setAccountMonitoredSA(
   id: string,

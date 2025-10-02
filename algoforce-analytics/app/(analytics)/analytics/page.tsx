@@ -128,7 +128,7 @@ export default function AnalyticsPage() {
 
           {/* Losing streaks based on BULK payload (filtered by selected) */}
           {perAccountsForStreaks ? (
-            <ConsecutiveLosingDaysCard perAccounts={perAccountsForStreaks} />
+            <ConsecutiveLosingDaysCard perAccounts={perAccountsForStreaks} accounts={accounts}/>
           ) : (
             <NoData title="Consecutive Losing Days" subtitle="No streak data" />
           )}
