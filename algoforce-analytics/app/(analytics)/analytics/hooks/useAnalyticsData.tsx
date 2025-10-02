@@ -197,22 +197,16 @@ export function useAnalyticsData(): AnalyticsData {
     };
   }, []);
 
-  // Ensure non-empty selection
-  useEffect(() => {
-    if (selected.length === 0 && accounts.length > 0) {
-      const monitored = accounts
-        .filter((a) => Boolean(a?.monitored))
-        .map((a) => a.redisName);
-      setSelected(
-        monitored.length > 0 ? monitored : accounts.map((a) => a.redisName)
-      );
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accounts.length]);
+  const [selectionReady, setSelectionReady] = useState(false);
 
-  // Fetch bulk MTD for SELECTED accounts
+  useEffect(() => {
+    if (accounts.length > 0 && selected.length > 0) {
+      setSelectionReady(true);
+    }
+  }, [accounts.length, selected.length]);
+
   const onAutoFetch = useCallback(async (): Promise<void> => {
-    if (selected.length === 0) return;
+    if (!selectionReady || selected.length === 0) return;
 
     setLoading(true);
     setError(null);
@@ -225,7 +219,7 @@ export function useAnalyticsData(): AnalyticsData {
     } finally {
       setLoading(false);
     }
-  }, [selected]);
+  }, [selectionReady, selected]);
 
   // initial + periodic refresh (30 mins)
   useEffect(() => {
@@ -233,7 +227,8 @@ export function useAnalyticsData(): AnalyticsData {
       void onAutoFetch();
     };
     if (selected.length > 0) run();
-    const id = window.setInterval(run, 30 * 60 * 1000);
+    // const id = window.setInterval(run, 30 * 60 * 1000);
+    const id = window.setInterval(run, 30 * 1000); // TEST
     return () => window.clearInterval(id);
   }, [onAutoFetch, selected.length]);
 
