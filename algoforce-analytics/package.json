@@ -4,8 +4,9 @@
   "private": true,
   "scripts": {
     "dev:next": "next dev --turbopack -p 5000",
-    "dev:api": "cross-env UVICORN_NO_UVLOOP=1 UVICORN_NO_HTTPTOOLS=1 python -m pip install -r ./api/requirements.txt && python -m uvicorn api.index:app --reload --host 127.0.0.1 --port 8001",
-    "dev": "concurrently -k -n NEXT,API -c \"cyan.bold,magenta.bold\" \"npm run dev:next\" \"npm run dev:api\"",
+    "dev:api": "cross-env UVICORN_NO_UVLOOP=1 UVICORN_NO_HTTPTOOLS=1 python -m uvicorn api.index:app --reload --reload-dir ./api --host 127.0.0.1 --port 8001",
+    "setup:api": "python -m pip install -r ./api/requirements.txt",
+    "dev": "concurrently -n NEXT,API -c green,blue \"npm:dev:next\" \"npm:dev:api\"",
     "build": "next build --turbopack",
     "start": "next start -p 5000",
     "lint": "next lint"

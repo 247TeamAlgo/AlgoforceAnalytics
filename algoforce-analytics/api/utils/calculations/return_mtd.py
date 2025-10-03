@@ -1,9 +1,10 @@
+# algoforce-analytics/api/utils/calculations/return_mtd.py
 from __future__ import annotations
 
 from typing import Dict, Any, List, Optional
 import pandas as pd
 
-from ..io import load_initial_balances, load_accounts, read_account_trades, read_upnl
+from ..io import load_day_open_balances, load_accounts, read_account_trades, read_upnl
 from ..metrics import mtd_return
 
 
@@ -11,14 +12,15 @@ def compute_return_mtd(
     *,
     override_accounts: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """Live MTD return per account and combined (via 'total')."""
-    init = load_initial_balances()
-    accounts = override_accounts if override_accounts is not None else load_accounts(True)
-    accounts = [a for a in accounts if a in init]
-
+    """Live MTD return per account and combined (via 'total'), with UPnL injected on the last day."""
     # MTD window
     today = pd.Timestamp.today().date()
     start_day = today.replace(day=1)
+
+    # month-open balances from DB
+    all_accounts = override_accounts if override_accounts is not None else load_accounts(True)
+    init = load_day_open_balances(all_accounts, start_day)
+    accounts = [a for a in all_accounts if a in init]
 
     series_list = []
     for acc in accounts:
@@ -40,13 +42,12 @@ def compute_return_mtd(
     bal = pd.concat([seed, bal]).sort_index()
     bal["total"] = bal[accounts].sum(axis=1)
 
+    # UPnL injection: per-account only, recompute total
     upnl = read_upnl(accounts)
     last = bal.index[-1]
-    for k, v in upnl.items():
-        if k in bal.columns:
-            bal.loc[last, k] = float(bal.loc[last, k]) + float(v)
-    if "total" in upnl:
-        bal.loc[last, "total"] = float(bal.loc[last, "total"]) + float(upnl["total"])
+    for a in accounts:
+        bal.loc[last, a] = float(bal.loc[last, a]) + float(upnl.get(a, 0.0))
+    bal["total"] = bal[accounts].sum(axis=1)
 
     ret = mtd_return(bal)
-    return {"mtdReturn": ret}
+    return {"mtdReturn": ret, "accounts": accounts}

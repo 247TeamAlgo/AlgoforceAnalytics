@@ -1,3 +1,4 @@
+# algoforce-analytics/api/utils/calculations/consecutive_losing_days.py
 from __future__ import annotations
 
 from typing import Dict, Any, List, Optional
@@ -7,7 +8,7 @@ from ..io import load_accounts, read_account_trades
 
 
 def compute_consecutive_losses_mtd(
-    *,
+    * ,
     override_accounts: Optional[List[str]] = None,
     day_start_hour: int = 8,
 ) -> Dict[str, Any]:

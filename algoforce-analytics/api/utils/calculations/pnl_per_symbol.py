@@ -1,3 +1,4 @@
+# algoforce-analytics/api/utils/calculations/pnl_per_symbol.py
 from __future__ import annotations
 
 from typing import Dict, Any, List, Optional
@@ -11,7 +12,7 @@ def compute_symbol_pnl_mtd(
     override_accounts: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
-    MTD-only total PnL per symbol with TOTAL column.
+    MTD-only total realized PnL per symbol with TOTAL column.
     """
     accounts = override_accounts if override_accounts is not None else load_accounts(True)
 
@@ -27,7 +28,7 @@ def compute_symbol_pnl_mtd(
 
     if not frames:
         return {
-            "window": {"startDay": start_day.isoformat(), "endDay": today.isoformat()},
+            "window": {"startDay": start_day.isoformat(), "endDay": today.isoformat() },
             "symbols": {},
             "accounts": accounts,
             "totalPerAccount": {a: 0.0 for a in accounts},

@@ -67,11 +67,12 @@ export function AccountsDialog() {
   const clearAll = (): void => setDraft([]);
 
   const apply = (): void => {
+    // Save to prefs; AnalyticsPage syncs this into useAnalyticsData → triggers bulk fetch
     setAnalyticsSelectedAccounts(draft);
     setOpen(false);
   };
 
-  const disabled = analyticsLoading || accounts.length === 0;
+  const disabled = analyticsLoading || (accounts?.length ?? 0) === 0;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -85,7 +86,7 @@ export function AccountsDialog() {
           <Users className="h-4 w-4" aria-hidden />
           Accounts
           <Badge variant="secondary" className="ml-1">
-            {analyticsSelectedAccounts.length}/{accounts.length}
+            {(analyticsSelectedAccounts?.length ?? 0)}/{accounts?.length ?? 0}
           </Badge>
         </Button>
       </DialogTrigger>
@@ -103,7 +104,7 @@ export function AccountsDialog() {
           <div className="flex items-center justify-between gap-2">
             <div className="text-sm text-muted-foreground">
               Selected: <span className="font-medium">{draft.length}</span> of{" "}
-              {accounts.length}
+              {accounts?.length ?? 0}
             </div>
             <div className="flex items-center gap-2">
               <Button

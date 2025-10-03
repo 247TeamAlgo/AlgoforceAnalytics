@@ -1,13 +1,11 @@
-// app/(analytics)/analytics/AnalyticsPage.tsx
 "use client";
 
 import { Card } from "@/components/ui/card";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { useEffect } from "react";
 
-import LiveUpnlStrip from "./components/LiveUpnlStrip";
 import NoData from "./components/NoDataCard";
-import CombinedMonthlyDrawdownCard from "./components/performance-metrics/CombinedPerformanceMTDCard";
+import CombinedPerformanceMTDCard from "./components/performance-metrics/CombinedPerformanceMTDCard";
 import ConsecutiveLosingDaysCard from "./components/performance-metrics/ConsecutiveLosingDaysCard";
 import TotalPnlBySymbolCard from "./components/performance-metrics/pnl-pair/TotalPnlBySymbolCard";
 import BalancesVerificationCard from "./components/performance-metrics/BalancesVerificationCard";
@@ -15,6 +13,7 @@ import BalancesVerificationCard from "./components/performance-metrics/BalancesV
 import { usePrefs } from "@/components/prefs/PrefsContext";
 import useAnalyticsData from "./hooks/useAnalyticsData";
 import type { Account } from "./lib/performance_metric_types";
+import LiveUpnlStrip from "./components/LiveUpnlStrip";
 
 function arraysEqual(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
@@ -34,18 +33,15 @@ export default function AnalyticsPage() {
     loading,
     error,
 
-    // BULK MTD payload and shims (already filtered by selected accounts)
     bulk,
     mergedForSymbols,
     perAccountsForStreaks,
 
     onAutoFetch,
 
-    // live overlays (independent of bulk; backend does not include UPNL in bulk)
-    upnlAsOf,
-    combinedUpnl,
-    upnlMap,
+    // live derived from bulk.uPnl
     upnlSymbolMap,
+    combinedUpnl,
   } = useAnalyticsData();
 
   const {
@@ -55,31 +51,32 @@ export default function AnalyticsPage() {
     setAnalyticsSelectedAccounts,
   } = usePrefs();
 
-  // Publish accounts + loading to global prefs
+  // Provide accounts list to global prefs (for AccountsDialog in navbar)
   useEffect(() => {
     setAnalyticsAccounts(accounts);
   }, [accounts, setAnalyticsAccounts]);
 
+  // Expose a lightweight loading flag (only first sequence shows spinner)
   useEffect(() => {
     setAnalyticsLoading(loading);
   }, [loading, setAnalyticsLoading]);
 
-  // Keep navbar selection and local selection in sync
+  // Keep local selection ↔ prefs in sync without overriding on every render.
   useEffect(() => {
     if (accounts.length === 0) return;
-    const cleaned = sanitizeSelection(accounts, analyticsSelectedAccounts);
 
-    if (cleaned.length === 0) {
-      const monitored = accounts
-        .filter((a) => Boolean(a.monitored))
-        .map((a) => a.redisName);
-      const fallback =
-        monitored.length > 0 ? monitored : accounts.map((a) => a.redisName);
-      setAnalyticsSelectedAccounts(fallback);
-      setSelected(fallback);
+    // Prefer whatever prefs currently hold; if empty, adopt hook's default (which is fund2&fund3 if present)
+    const cleaned = sanitizeSelection(
+      accounts,
+      analyticsSelectedAccounts
+    );
+    if (cleaned.length === 0 && selected.length > 0) {
+      // initialize prefs from hook's selected
+      setAnalyticsSelectedAccounts(selected);
       return;
     }
 
+    // Align both ways but avoid loops by diffing
     if (!arraysEqual(cleaned, analyticsSelectedAccounts)) {
       setAnalyticsSelectedAccounts(cleaned);
     }
@@ -94,7 +91,7 @@ export default function AnalyticsPage() {
     setSelected,
   ]);
 
-  // Fetch BULK MTD whenever selected changes
+  // First-render bulk fetch (with graceful “double fetch” if hasUpdated), later silent refreshes are inside hook
   useEffect(() => {
     if (selected.length > 0) void onAutoFetch();
   }, [selected.length, onAutoFetch]);
@@ -109,31 +106,35 @@ export default function AnalyticsPage() {
           </Card>
         ) : null}
 
-        {/* Live UPNL strip (independent polling, uses selected accounts) */}
-        <LiveUpnlStrip
-          accounts={accounts}
-          selected={selected}
-          upnlAsOf={upnlAsOf}
-          combined={combinedUpnl}
-          perAccount={upnlMap}
-        />
+        {/* {bulk?.uPnl ? (
+          <div className="mb-5">
+            <LiveUpnlStrip bulk={bulk} />
+          </div>
+        ) : null} */}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          {/* Drawdown/Return (MTD) from BULK payload */}
+          {/* Four-metric MTD (realized + margin/live via combinedUpnl) */}
           {bulk ? (
-            <CombinedMonthlyDrawdownCard bulk={bulk} />
+            <CombinedPerformanceMTDCard
+              bulk={bulk}
+              selected={selected}
+              combinedUpnl={combinedUpnl ?? 0}
+            />
           ) : (
-            <NoData title="Drawdown" subtitle="No MTD data yet" />
+            <NoData title="Drawdown / Return" subtitle="No MTD data yet" />
           )}
 
-          {/* Losing streaks based on BULK payload (filtered by selected) */}
+          {/* Losing streaks (realized) */}
           {perAccountsForStreaks ? (
-            <ConsecutiveLosingDaysCard perAccounts={perAccountsForStreaks} accounts={accounts}/>
+            <ConsecutiveLosingDaysCard
+              perAccounts={perAccountsForStreaks}
+              accounts={accounts}
+            />
           ) : (
             <NoData title="Consecutive Losing Days" subtitle="No streak data" />
           )}
 
-          {/* Ranked Symbols (realized) based on BULK payload (filtered by selected) */}
+          {/* Ranked Symbols (realized) with optional live overlay */}
           {mergedForSymbols ? (
             <TotalPnlBySymbolCard
               metrics={mergedForSymbols}
@@ -144,7 +145,7 @@ export default function AnalyticsPage() {
           )}
         </div>
 
-        {/* NEW: All balances verification table (selected accounts only) */}
+        {/* Balances verification (realized) */}
         {bulk ? (
           <div className="mt-5">
             <BalancesVerificationCard bulk={bulk} selected={selected} />
