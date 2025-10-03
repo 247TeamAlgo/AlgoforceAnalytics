@@ -6,12 +6,19 @@ from dataclasses import dataclass
 from typing import Dict, Any, List, Optional, Tuple
 from decimal import Decimal, ROUND_DOWN
 from datetime import date, datetime
+import time  # <-- added
 
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
+
+# --- logging (added) ---
+from pathlib import Path
+import logging
+from logging.handlers import TimedRotatingFileHandler
+# -----------------------
 
 from api.utils.io import (
     load_accounts,
@@ -24,6 +31,26 @@ from api.utils.metrics import pct_returns, monthly_return, monthly_drawdown
 
 load_dotenv(".env.local")
 app = FastAPI(title="Algoforce Metrics API", version="1.8.2")
+
+# === local file logger (api/backend.log) ===
+LOG_DIR = Path(__file__).resolve().parent
+LOG_FILE = LOG_DIR / "backend.log"
+
+logger = logging.getLogger("api.index")
+logger.setLevel(logging.INFO)
+logger.handlers.clear()
+_file_handler = TimedRotatingFileHandler(
+    LOG_FILE, when="midnight", backupCount=14, encoding="utf-8", utc=True
+)
+_file_handler.setFormatter(
+    logging.Formatter(
+        "%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        "%Y-%m-%dT%H:%M:%S%z",
+    )
+)
+logger.addHandler(_file_handler)
+logger.propagate = False
+# ======================================
 
 
 # ---------------- helpers ----------------
@@ -101,10 +128,22 @@ def _truncate4(x: float) -> float:
     return float(Decimal(str(x)).quantize(Decimal("0.0000"), rounding=ROUND_DOWN))
 
 
+# ---------------- lifecycle logs (added) ----------------
+@app.on_event("startup")
+async def _on_startup():
+    logger.info("API starting up")
+
+@app.on_event("shutdown")
+async def _on_shutdown():
+    logger.info("API shutting down")
+# -------------------------------------------------------
+
+
 # ---------------- routes ----------------
 
 @app.get("/api/health")
 def health() -> Dict[str, str]:
+    logger.info("GET /api/health")
     return {"status": "ok"}
 
 
@@ -121,6 +160,9 @@ def metrics_bulk_mtd(
       - inject UPnL per-account ONLY on the last row; recompute total
       - returns-with-UPnL override only the last row using prev from PRE-UPnL
     """
+    t0 = time.perf_counter()
+    logger.info("GET /api/metrics/bulk accounts_param=%s", accounts)
+
     start_day, end_day = _mtd_window()
 
     # Accounts requested
@@ -132,11 +174,16 @@ def metrics_bulk_mtd(
     init = load_day_open_balances(req_accs, start_day)
     accs = [a for a in req_accs if a in init]
     if not accs:
-        return JSONResponse(content={
+        payload = {
             "window": {"startDay": start_day.isoformat(), "endDay": end_day.isoformat(), "mode": "MTD"},
             "accounts": [],
             "message": "No accounts had month-open equity in balance.{account}_balance.",
-        }, status_code=200)
+        }
+        logger.info(
+            "bulk empty: start=%s end=%s accs=0 duration_ms=%.2f",
+            start_day, end_day, (time.perf_counter() - t0) * 1000.0
+        )
+        return JSONResponse(content=payload, status_code=200)
     init = {a: _truncate4(init[a]) for a in accs}
 
     # Pull trades once per account → daily realized
@@ -280,11 +327,27 @@ def metrics_bulk_mtd(
             "perAccount": {a: float(read_upnl(accs).get(a, 0.0)) for a in accs},
         },
     }
+
+    # logger.info(
+    #     "bulk ok: start=%s end=%s accs=%d returns_rows=%d duration_ms=%.2f",
+    #     start_day,
+    #     end_day,
+    #     len(accs),
+    #     len(payload.get("returns", {})),
+    #     (time.perf_counter() - t0) * 1000.0,
+    # )
+    
+    logger.info("START OF PAYLOAD")
+    for key, value in payload.items():
+        logger.info(f"{key}: {value}")
+    logger.info("END OF PAYLOAD")
+
     return JSONResponse(content=payload)
 
 
 @app.get("/api/accounts")
 def accounts_info() -> JSONResponse:
+    logger.info("GET /api/accounts")
     data = load_accounts_info()
     return JSONResponse(content=data, headers={"Cache-Control": "private, max-age=30"})
 
@@ -296,6 +359,7 @@ def upnl_endpoint(
     """
     DEPRECATED: UPnL is now included in /api/metrics/bulk under `uPnl`.
     """
+    logger.info("GET /api/upnl (deprecated) accounts_param=%s", accounts)
     return JSONResponse(
         status_code=410,
         content={

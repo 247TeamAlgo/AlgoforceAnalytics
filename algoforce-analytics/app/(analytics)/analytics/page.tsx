@@ -106,11 +106,11 @@ export default function AnalyticsPage() {
           </Card>
         ) : null}
 
-        {/* {bulk?.uPnl ? (
+        {(bulk?.uPnl?.perAccount) && combinedUpnl ? (
           <div className="mb-5">
-            <LiveUpnlStrip bulk={bulk} />
+            <LiveUpnlStrip combined={combinedUpnl} perAccount={bulk?.uPnl?.perAccount} />
           </div>
-        ) : null} */}
+        ) : null}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           {/* Four-metric MTD (realized + margin/live via combinedUpnl) */}

@@ -1,25 +1,23 @@
+// app/(analytics)/analytics/components/LiveUpnlStrip.tsx
 "use client";
 
 import * as React from "react";
 import { Card } from "@/components/ui/card";
-import {
-  fmtUsd,
-  displayName,
-  type Account,
-} from "../lib/performance_metric_types";
-import {
-  Activity,
-  TrendingUp,
-  TrendingDown,
-  Minus,
-} from "lucide-react";
+import { Activity, TrendingUp, TrendingDown, Minus } from "lucide-react";
+
+function usd(n?: number): string {
+  const v = typeof n === "number" && Number.isFinite(n) ? n : 0;
+  const sign = v < 0 ? "-" : "";
+  return `${sign}$${Math.abs(v).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
 
 type Props = {
-  accounts: Account[];
-  selected: string[]; // used to summarize; chips are sorted by PnL only
-  combined?: number; // combined for selected; if absent we compute from perAccount
-  perAccount?: Record<string, number>;
-  maxAccounts?: number;
+  combined?: number;                    // total unrealized PnL
+  perAccount?: Record<string, number>;  // { fund2: 123, fund3: -45 }
+  maxAccounts?: number;                 // <=0 means unlimited; default 10
 };
 
 function clsPosNeg(n: number | undefined): string {
@@ -29,115 +27,94 @@ function clsPosNeg(n: number | undefined): string {
   return "text-muted-foreground";
 }
 
-function chipStyle(n: number | undefined, isSelected: boolean): string {
+function chipStyle(n: number | undefined): string {
   if (typeof n !== "number" || Number.isNaN(n))
-    return isSelected
-      ? "bg-muted/40 border-muted/40 text-muted-foreground"
-      : "bg-muted/20 border-muted/30 text-muted-foreground";
+    return "bg-muted/20 border-muted/30 text-muted-foreground";
   if (n > 0)
-    return isSelected
-      ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-700 dark:text-emerald-300"
-      : "bg-emerald-500/6 border-emerald-500/25 text-emerald-700/80 dark:text-emerald-300/80";
+    return "bg-emerald-500/6 border-emerald-500/25 text-emerald-700/80 dark:text-emerald-300/80";
   if (n < 0)
-    return isSelected
-      ? "bg-red-500/10 border-red-500/40 text-red-700 dark:text-red-300"
-      : "bg-red-500/6 border-red-500/25 text-red-700/80 dark:text-red-300/80";
-  return isSelected
-    ? "bg-muted/40 border-muted/40 text-muted-foreground"
-    : "bg-muted/20 border-muted/30 text-muted-foreground";
+    return "bg-red-500/6 border-red-500/25 text-red-700/80 dark:text-red-300/80";
+  return "bg-muted/20 border-muted/30 text-muted-foreground";
 }
 
 function chipIcon(n: number | undefined) {
-  if (typeof n !== "number" || Number.isNaN(n))
-    return <Minus className="h-3.5 w-3.5" />;
+  if (typeof n !== "number" || Number.isNaN(n)) return <Minus className="h-3.5 w-3.5" />;
   if (n > 0) return <TrendingUp className="h-3.5 w-3.5" />;
   if (n < 0) return <TrendingDown className="h-3.5 w-3.5" />;
   return <Minus className="h-3.5 w-3.5" />;
 }
 
 export default function LiveUpnlStrip({
-  accounts,
-  selected,
   combined,
   perAccount,
   maxAccounts = 10,
 }: Props) {
-  const labelByKey = React.useMemo<Record<string, string>>(() => {
-    const m: Record<string, string> = {};
-    for (const a of accounts) m[a.redisName] = displayName(a);
-    return m;
-  }, [accounts]);
+  const rows = React.useMemo(() => {
+    const entries = Object.entries(perAccount ?? {}).map(([key, v]) => ({
+      key,
+      label: key,
+      v: typeof v === "number" && Number.isFinite(v) ? v : Number(v) || 0,
+    }));
+    entries.sort((a, b) => b.v - a.v);
+    return entries;
+  }, [perAccount]);
 
-  const selectedSet = React.useMemo(
-    () => new Set<string>(selected),
-    [selected]
+  const visible = React.useMemo(
+    () => (maxAccounts > 0 ? rows.slice(0, maxAccounts) : rows),
+    [rows, maxAccounts]
   );
 
-  const allRows = React.useMemo(() => {
-    const keys = perAccount ? Object.keys(perAccount) : [];
-    const r = keys.map((k) => ({
-      key: k,
-      label: labelByKey[k] ?? k,
-      v: perAccount?.[k] ?? 0,
-      isSelected: selectedSet.has(k),
-    }));
-    r.sort((a, b) => b.v - a.v);
-    return r;
-  }, [perAccount, labelByKey, selectedSet]);
+  const hiddenCount = rows.length - visible.length;
 
-  const visible = React.useMemo(() => {
-    if (maxAccounts > 0) return allRows.slice(0, maxAccounts);
-    return allRows;
-  }, [allRows, maxAccounts]);
-
-  const hiddenCount = allRows.length - visible.length;
-
-  const combinedSelected = React.useMemo(() => {
-    if (typeof combined === "number" && !Number.isNaN(combined)) return combined;
-    if (!perAccount) return undefined;
-    let sum = 0;
-    for (const id of selected) {
-      const v = perAccount[id];
-      if (typeof v === "number" && !Number.isNaN(v)) sum += v;
-    }
-    return sum;
-  }, [combined, perAccount, selected]);
+  const combinedValue = React.useMemo(() => {
+    if (typeof combined === "number" && Number.isFinite(combined)) return combined;
+    return rows.reduce((s, r) => s + (Number.isFinite(r.v) ? r.v : 0), 0);
+  }, [combined, rows]);
 
   return (
-    <Card className="p-4 sm:p-5 flex flex-col gap-3 rounded-xl border shadow-sm">
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <div
+    <Card className="p-3 sm:p-4 rounded-xl border shadow-sm">
+      {/* ONE-LINER container */}
+      <div
+        className="
+          flex items-center gap-2 flex-nowrap overflow-x-auto whitespace-nowrap
+          [&>*]:shrink-0
+        "
+        aria-label="Unrealized PnL summary"
+      >
+        {/* Combined pill */}
+        <span
+          className={[
+            "inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 border",
+            "bg-background/70 backdrop-blur supports-[backdrop-filter]:bg-background/50",
+          ].join(" ")}
+          title="Combined unrealized PnL"
+        >
+          <Activity className={["h-4 w-4", clsPosNeg(combinedValue)].join(" ")} />
+          <span
             className={[
-              "inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 border",
-              "bg-background/70 backdrop-blur supports-[backdrop-filter]:bg-background/50",
+              "text-xl font-semibold tabular-nums",
+              clsPosNeg(combinedValue),
             ].join(" ")}
           >
-            <Activity className={["h-4 w-4", clsPosNeg(combinedSelected)].join(" ")} />
-            <span className={["text-xl font-semibold tabular-nums", clsPosNeg(combinedSelected)].join(" ")}>
-              {fmtUsd(combinedSelected ?? null)}
-            </span>
-            <span className="text-xs text-muted-foreground">Unrealized PnL</span>
-          </div>
-        </div>
-      </div>
+            {usd(combinedValue)}
+          </span>
+          <span className="text-xs text-muted-foreground">Unrealized PnL</span>
+        </span>
 
-      <div className="flex flex-wrap gap-2">
+        {/* Account chips (all on the same line) */}
         {visible.map((r) => (
           <span
             key={r.key}
             className={[
               "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
               "transition-colors",
-              chipStyle(r.v, r.isSelected),
+              chipStyle(r.v),
             ].join(" ")}
-            title={`${r.key}${r.isSelected ? " • selected" : ""}`}
+            title={r.key}
           >
             {chipIcon(r.v)}
-            <span className="font-medium truncate max-w-[160px]">
-              {r.label}
-            </span>
-            <span className="tabular-nums">{fmtUsd(r.v)}</span>
+            <span className="font-medium truncate max-w-[160px]">{r.label}</span>
+            <span className="tabular-nums">{usd(r.v)}</span>
           </span>
         ))}
 
@@ -147,12 +124,6 @@ export default function LiveUpnlStrip({
             title="Some accounts hidden due to maxAccounts"
           >
             +{hiddenCount} more
-          </span>
-        ) : null}
-
-        {allRows.length === 0 ? (
-          <span className="text-xs text-muted-foreground">
-            No per-account data.
           </span>
         ) : null}
       </div>
