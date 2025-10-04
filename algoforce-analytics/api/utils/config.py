@@ -44,3 +44,17 @@ def get_engine() -> Engine:
 def get_redis() -> redis.Redis:
     # decode_responses=True so mget returns str; json.loads expects str
     return redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+
+# ---------------- Convenience helpers (optional) ----------------
+
+def get_accounts_path() -> str:
+    """Absolute path to accounts.json"""
+    return ACCOUNTS_JSON_PATH
+
+def get_accounts_dir() -> str:
+    """Directory that contains accounts.json"""
+    return os.path.dirname(ACCOUNTS_JSON_PATH)
+
+def get_account_key_field() -> str:
+    """Field name used as the account key in accounts.json"""
+    return ACCOUNT_KEY_FIELD

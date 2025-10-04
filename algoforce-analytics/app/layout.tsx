@@ -7,6 +7,7 @@ import "./globals.css";
 
 import { Navbar } from "@/components/layout/NavBar";
 import { PrefsProvider } from "@/components/prefs/PrefsContext";
+import { ReactNode } from "react";
 
 export const metadata: Metadata = {
   title: "Algoforce Strategy Dashboard",
@@ -16,7 +17,7 @@ export const metadata: Metadata = {
 export default function RootLayout({
   children,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <html lang="en" suppressHydrationWarning>

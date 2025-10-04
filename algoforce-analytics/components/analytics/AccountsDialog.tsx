@@ -18,6 +18,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { usePrefs } from "@/components/prefs/PrefsContext";
 import { displayName } from "@/app/(analytics)/analytics/lib/performance_metric_types";
+import { toast } from "sonner";
+import { useEffect, useMemo, useState } from "react";
 
 export function AccountsDialog() {
   const {
@@ -27,24 +29,24 @@ export function AccountsDialog() {
     analyticsLoading,
   } = usePrefs();
 
-  const [open, setOpen] = React.useState<boolean>(false);
-  const [q, setQ] = React.useState<string>("");
-  const [draft, setDraft] = React.useState<string[]>(analyticsSelectedAccounts);
+  const [open, setOpen] = useState<boolean>(false);
+  const [q, setQ] = useState<string>("");
+  const [draft, setDraft] = useState<string[]>(analyticsSelectedAccounts);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (open) setDraft(analyticsSelectedAccounts);
   }, [open, analyticsSelectedAccounts]);
 
-  const selectedSet = React.useMemo(() => new Set<string>(draft), [draft]);
+  const selectedSet = useMemo(() => new Set<string>(draft), [draft]);
 
-  const ordered = React.useMemo(() => {
+  const ordered = useMemo(() => {
     const list = Array.isArray(accounts) ? accounts : [];
     const monitored = list.filter((a) => Boolean(a?.monitored));
     const rest = list.filter((a) => !a?.monitored);
     return monitored.concat(rest);
   }, [accounts]);
 
-  const filtered = React.useMemo(() => {
+  const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
     if (!term) return ordered;
     return ordered.filter((a) => {
@@ -66,13 +68,23 @@ export function AccountsDialog() {
     );
   const clearAll = (): void => setDraft([]);
 
+  const hasSelection = draft.length > 0;
+  const disabledBase = analyticsLoading || (accounts?.length ?? 0) === 0;
+  const disabledApply = disabledBase || !hasSelection;
+
   const apply = (): void => {
-    // Save to prefs; AnalyticsPage syncs this into useAnalyticsData → triggers bulk fetch
+    if (!hasSelection) {
+      toast.error("Select at least one account to continue.");
+      return;
+    }
     setAnalyticsSelectedAccounts(draft);
     setOpen(false);
+    toast.success(
+      draft.length === 1
+        ? "1 account selected."
+        : `${draft.length} accounts selected.`
+    );
   };
-
-  const disabled = analyticsLoading || (accounts?.length ?? 0) === 0;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -86,7 +98,7 @@ export function AccountsDialog() {
           <Users className="h-4 w-4" aria-hidden />
           Accounts
           <Badge variant="secondary" className="ml-1">
-            {(analyticsSelectedAccounts?.length ?? 0)}/{accounts?.length ?? 0}
+            {analyticsSelectedAccounts?.length ?? 0}/{accounts?.length ?? 0}
           </Badge>
         </Button>
       </DialogTrigger>
@@ -111,7 +123,8 @@ export function AccountsDialog() {
                 variant="secondary"
                 size="sm"
                 onClick={selectMonitored}
-                disabled={disabled}
+                disabled={disabledBase}
+                aria-disabled={disabledBase}
               >
                 <ShieldCheck className="h-4 w-4 mr-1" />
                 Monitored
@@ -120,7 +133,8 @@ export function AccountsDialog() {
                 variant="secondary"
                 size="sm"
                 onClick={selectAll}
-                disabled={disabled}
+                disabled={disabledBase}
+                aria-disabled={disabledBase}
               >
                 <BadgeCheck className="h-4 w-4 mr-1" />
                 Select All
@@ -129,7 +143,8 @@ export function AccountsDialog() {
                 variant="ghost"
                 size="sm"
                 onClick={clearAll}
-                disabled={disabled || draft.length === 0}
+                disabled={disabledBase || draft.length === 0}
+                aria-disabled={disabledBase || draft.length === 0}
               >
                 Clear
               </Button>
@@ -143,6 +158,7 @@ export function AccountsDialog() {
               placeholder="Search accounts…"
               value={q}
               onChange={(e) => setQ(e.target.value)}
+              aria-label="Search accounts"
             />
           </div>
 
@@ -152,9 +168,8 @@ export function AccountsDialog() {
             <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-2">
               {filtered.map((a) => {
                 const checked = selectedSet.has(a.redisName);
-                const label = displayName(a);
+                const label = displayName({ ...a, display: a.display ?? undefined });
                 const Icon = a.monitored ? ShieldCheck : Server;
-
                 return (
                   <label
                     key={a.redisName}
@@ -193,7 +208,11 @@ export function AccountsDialog() {
             <Button variant="ghost" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={apply} disabled={disabled}>
+            <Button
+              onClick={apply}
+              disabled={disabledApply}
+              aria-disabled={disabledApply}
+            >
               Apply
             </Button>
           </div>

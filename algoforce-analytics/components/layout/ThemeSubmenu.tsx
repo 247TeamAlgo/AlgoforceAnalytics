@@ -1,39 +1,43 @@
 "use client";
 
 import {
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
+  DropdownMenu,
   DropdownMenuPortal,
-  DropdownMenuSubContent,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ChevronLeft, SunMoon } from "lucide-react";
+import { SunMoon } from "lucide-react";
 import { useTheme } from "next-themes";
-import type { SyntheticEvent } from "react";
 
-export function keepOpen(e: Event | SyntheticEvent): void {
-  (e as unknown as { preventDefault?: () => void }).preventDefault?.();
+// Keep the Radix dropdown open on item select
+function keepOpen(e: Event): void {
+  e.preventDefault();
 }
 
-export function ThemeSubmenu({
-  subTrigger,
-  subLeft,
-}: {
-  subTrigger: string;
-  subLeft: string;
-}) {
+export function ThemeMenu() {
   const { theme, setTheme } = useTheme();
 
   return (
-    <DropdownMenuSub>
-      <DropdownMenuSubTrigger className={subTrigger} onSelect={keepOpen}>
-        <ChevronLeft className="h-4 w-4" aria-hidden />
-        <SunMoon className="h-4 w-4" aria-hidden />
-        <span>Theme</span>
-      </DropdownMenuSubTrigger>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label="Theme"
+          className="h-9 inline-flex items-center gap-2 rounded-md border px-3 text-xs transition-colors hover:bg-accent"
+        >
+          <SunMoon className="h-4 w-4" aria-hidden />
+        </button>
+      </DropdownMenuTrigger>
+
       <DropdownMenuPortal>
-        <DropdownMenuSubContent sideOffset={8} className={`w-44 ${subLeft}`}>
+        <DropdownMenuContent
+          sideOffset={8}
+          className="w-44"
+          // Optional: avoid focus jumping the trigger when menu would auto-close
+          onCloseAutoFocus={(e) => e.preventDefault()}
+        >
           <DropdownMenuRadioGroup
             value={String(theme)}
             onValueChange={(v) => setTheme(v)}
@@ -45,6 +49,7 @@ export function ThemeSubmenu({
             >
               Light
             </DropdownMenuRadioItem>
+
             <DropdownMenuRadioItem
               value="dark"
               className="cursor-pointer"
@@ -52,6 +57,7 @@ export function ThemeSubmenu({
             >
               Dark
             </DropdownMenuRadioItem>
+
             <DropdownMenuRadioItem
               value="system"
               className="cursor-pointer"
@@ -60,8 +66,8 @@ export function ThemeSubmenu({
               System
             </DropdownMenuRadioItem>
           </DropdownMenuRadioGroup>
-        </DropdownMenuSubContent>
+        </DropdownMenuContent>
       </DropdownMenuPortal>
-    </DropdownMenuSub>
+    </DropdownMenu>
   );
 }
