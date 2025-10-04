@@ -1,15 +1,17 @@
-// algoforce-analytics\app\(analytics)\analytics\layout.tsx
-import type { ReactNode } from "react";
+import type { Metadata } from "next";
+import { ReactNode } from "react";
 
-export default function AnalyticsLayout({ children }: { children: ReactNode }) {
+export const metadata: Metadata = {
+  title: "Trading Strategy Analytics",
+  description: "Live MTD metrics (combined + per-account)",
+};
+
+export default function AnalyticsLayout({
+  children,
+}: {
+  children: ReactNode;
+}) {
   return (
-    // Fixed-height viewport container that *always* scrolls vertically
-    <div className="h-dvh min-h-screen w-full flex-col">
-      <div className="flex min-h-0 w-full flex-1">
-        <div className="bg-background flex min-h-0 flex-1 flex-col">
-          {children}
-        </div>
-      </div>
-    </div>
+    <section className="mx-auto max-w-[1600px] px-3 py-4">{children}</section>
   );
 }

@@ -1,10 +1,12 @@
-// app/(analytics)/analytics/page.tsx
 "use client";
 
-import PerformanceMetricClient from "@/app/apitest/components/PerformanceMetricsClient";
-import { useAccountsPrefs } from "@/components/prefs/AccountsContext";
-import { usePerformanceMetrics } from "@/components/prefs/metrics/PerformanceMetricsContext";
-import React, { useMemo } from "react";
+import * as React from "react";
+import {
+  useAccountsPrefs,
+  usePerformanceMetrics,
+} from "@/components/prefs/PrefsContext";
+import PerformanceMetricClient from "./components/PerformanceMetricsClient";
+import { useMemo } from "react";
 
 export default function Page() {
   const { analyticsSelectedAccounts } = useAccountsPrefs();
@@ -18,9 +20,9 @@ export default function Page() {
 
   const accounts = useMemo(
     () =>
-      (analyticsSelectedAccounts?.length
+      analyticsSelectedAccounts?.length
         ? analyticsSelectedAccounts
-        : ["fund2", "fund3"]) as string[],
+        : ["fund2", "fund3"],
     [analyticsSelectedAccounts]
   );
 
