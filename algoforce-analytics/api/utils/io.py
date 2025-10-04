@@ -100,11 +100,11 @@ def _fetch_month_open_for_balance_table(
 
 def load_day_open_balances(accounts: List[str], day: date, day_start_hour: int = 0) -> Dict[str, float]:
     """
-    Month-open equity with local boundary handling:
+    Month-open equity anchor:
       - 'day' is the local month-open day (e.g., 2025-10-01).
-      - 'day_start_hour' is the local-to-UTC offset in hours (e.g., 8 for Asia/Manila).
-      - We fetch earliest balance on [local 00:00, local 23:59:59] converted to UTC,
-        otherwise the last balance strictly before local 00:00 (UTC).
+      - 'day_start_hour' is the local-to-UTC offset in hours (0 for UTC).
+      - Prefer earliest balance on [local 00:00, local 23:59:59] converted to UTC;
+        otherwise last balance strictly before local 00:00 UTC.
     """
     eng = get_engine()
     out: Dict[str, float] = {}
@@ -147,7 +147,14 @@ def load_day_open_balances(accounts: List[str], day: date, day_start_hour: int =
 
     return out
 
-# ---------------- Trades & UPnL ----------------
+# ---------------- Trades / Txn / Earnings / UPnL ----------------
+
+def _to_indexed(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
+    if df.empty:
+        return df
+    df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
+    df = df.dropna(subset=[time_col]).sort_values(time_col).set_index(time_col)
+    return df
 
 def read_account_trades(account: str, start_dt: str, end_dt: str) -> pd.DataFrame:
     """
@@ -169,11 +176,53 @@ def read_account_trades(account: str, start_dt: str, end_dt: str) -> pd.DataFram
             ],
         ).set_index(pd.DatetimeIndex([], name="time"))
 
-    df["time"] = pd.to_datetime(df["time"], errors="coerce")
-    df = df.dropna(subset=["time"]).sort_values("time").set_index("time")
+    df = _to_indexed(df, "time")
     to_num = lambda s: pd.to_numeric(s, errors="coerce").fillna(0.0)
     df["realizedPnl"] = to_num(df["realizedPnl"]) - to_num(df["commission"])
     df["account"] = account
+    return df
+
+def read_account_txn(account: str, start_dt: str, end_dt: str) -> pd.DataFrame:
+    """
+    Transaction history from `transaction_history.{account}_transaction`
+    Columns used: incomeType (str), income (float), time (datetime index).
+    """
+    eng = get_engine()
+    sql = (
+        f"SELECT incomeType, income, time "
+        f"FROM `transaction_history`.`{account}_transaction` "
+        f"WHERE time >= :start AND time <= :end"
+    )
+    with eng.connect() as conn:
+        df = pd.read_sql_query(text(sql), conn, params={"start": start_dt, "end": end_dt})
+    if df.empty:
+        return pd.DataFrame(columns=["incomeType", "income"]).set_index(
+            pd.DatetimeIndex([], name="time")
+        )
+    df = _to_indexed(df, "time")
+    df["incomeType"] = df["incomeType"].astype(str)
+    df["income"] = pd.to_numeric(df["income"], errors="coerce").fillna(0.0)
+    return df
+
+def read_account_earnings(account: str, start_dt: str, end_dt: str) -> pd.DataFrame:
+    """
+    Earnings from `earnings.{account}_earnings`
+    Columns used: rewards (float), time (datetime index).
+    """
+    eng = get_engine()
+    sql = (
+        f"SELECT rewards, time "
+        f"FROM `earnings`.`{account}_earnings` "
+        f"WHERE time >= :start AND time <= :end"
+    )
+    with eng.connect() as conn:
+        df = pd.read_sql_query(text(sql), conn, params={"start": start_dt, "end": end_dt})
+    if df.empty:
+        return pd.DataFrame(columns=["rewards"]).set_index(
+            pd.DatetimeIndex([], name="time")
+        )
+    df = _to_indexed(df, "time")
+    df["rewards"] = pd.to_numeric(df["rewards"], errors="coerce").fillna(0.0)
     return df
 
 def read_upnl(accounts: List[str]) -> Dict[str, float]:

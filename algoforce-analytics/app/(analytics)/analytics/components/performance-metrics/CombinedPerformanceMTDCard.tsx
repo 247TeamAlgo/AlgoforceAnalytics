@@ -168,8 +168,10 @@ export default function CombinedPerformanceMTDCard({
   const deltaBal = totalBal - startBal;
 
   // Realized metrics
-  const realizedReturn = startBal > 0 ? (latestRealized - startBal) / startBal : 0;
-  const realizedDD = minDrawdown(realizedEq);
+  // const realizedReturn = startBal > 0 ? (latestRealized - startBal) / startBal : 0;
+  // const realizedDD = minDrawdown(realizedEq);
+  const realizedReturn = bulk?.combinedLiveMonthlyReturn?.total ?? 0;
+  const realizedDD = bulk?.combinedLiveMonthlyDrawdown?.total ?? 0;
 
   // Margin metrics (series with UPNL added to last)
   const marginEq = React.useMemo(() => {
@@ -178,13 +180,24 @@ export default function CombinedPerformanceMTDCard({
     out[out.length - 1] = marginLatest;
     return out;
   }, [realizedEq, marginLatest]);
-  const marginReturn =
-    startBal > 0 && marginEq.length
-      ? (marginEq[marginEq.length - 1]! - startBal) / startBal
-      : 0;
-  const marginDD = minDrawdown(marginEq);
+  // const marginReturn =
+  //   startBal > 0 && marginEq.length
+  //     ? (marginEq[marginEq.length - 1]! - startBal) / startBal
+  //     : 0;
+  // const marginDD = minDrawdown(marginEq);
+  const marginReturn = bulk?.combinedLiveMonthlyReturnWithUpnl?.total ?? 0;
+  const marginDD = bulk?.combinedLiveMonthlyDrawdownWithUpnl?.total ?? 0;
+
+  // TESTS
+  // const alert1 = `[TEST] combinedLiveMonthlyReturn = ${JSON.stringify(bulk?.combinedLiveMonthlyReturn)}`;
+  // const alert2 = `[TEST] combinedLiveMonthlyDrawdown = ${JSON.stringify(bulk?.combinedLiveMonthlyDrawdown)}`;
+  // const alert3 = `[TEST] combinedLiveMonthlyReturnWithUpnl = ${JSON.stringify(bulk?.combinedLiveMonthlyReturnWithUpnl)}`;
+  // const alert4 = `[TEST] combinedLiveMonthlyDrawdownWithUpnl = ${JSON.stringify(bulk?.combinedLiveMonthlyDrawdownWithUpnl)}`;
+  // alert(`${alert1}\n${alert2}\n${alert3}\n${alert4}`)
+
 
   /* ----- Drawdown rows & thresholds ----- */
+
   const ddRows = React.useMemo(
     () => [
       { k: "Realized", v: Math.abs(realizedDD), display: realizedDD, c: REALIZED_COLOR },

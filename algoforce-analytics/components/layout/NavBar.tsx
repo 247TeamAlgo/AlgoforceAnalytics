@@ -2,17 +2,19 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Settings, Activity, Users } from "lucide-react";
-
-import { ControlsMenu } from "@/components/layout/ControlsMenu";
-import { usePrefs } from "@/components/prefs/PrefsContext";
+import * as React from "react";
+import { Activity, Users, SunMoon, Check } from "lucide-react";
+import { useTheme } from "next-themes";
 import { AccountsDialog } from "../analytics/AccountsDialog";
+import { usePrefs } from "../prefs/PrefsContext";
 
-async function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-async function fetchJsonRetry<T>(url: string, retries = 4, baseDelayMs = 250): Promise<T> {
+type BulkAsOfPayload = { uPnl?: { as_of?: string } };
+
+async function fetchJsonRetry<T>(
+  url: string,
+  retries = 4,
+  baseDelayMs = 250
+): Promise<T> {
   let last: unknown;
   for (let i = 0; i <= retries; i += 1) {
     try {
@@ -21,7 +23,8 @@ async function fetchJsonRetry<T>(url: string, retries = 4, baseDelayMs = 250): P
       return (await res.json()) as T;
     } catch (e) {
       last = e;
-      if (i < retries) await sleep(baseDelayMs * 2 ** i);
+      if (i < retries)
+        await new Promise((r) => setTimeout(r, baseDelayMs * 2 ** i));
     }
   }
   throw last instanceof Error ? last : new Error("Request failed");
@@ -33,6 +36,7 @@ function msSince(iso?: string): number | undefined {
   if (Number.isNaN(t)) return undefined;
   return Date.now() - t;
 }
+
 function freshnessMeta(iso?: string) {
   const ms = msSince(iso);
   let rel = "unknown";
@@ -62,7 +66,10 @@ function freshnessMeta(iso?: string) {
 
     const dt = iso ? new Date(iso) : undefined;
     if (dt && !Number.isNaN(dt.getTime())) {
-      abs = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" }).format(dt);
+      abs = new Intl.DateTimeFormat(undefined, {
+        dateStyle: "medium",
+        timeStyle: "medium",
+      }).format(dt);
       tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
     }
   }
@@ -70,54 +77,62 @@ function freshnessMeta(iso?: string) {
   return { dot, text, border, relLabel: rel, absLabel: abs, tz };
 }
 
-type BulkAsOfPayload = { uPnl?: { as_of?: string } };
-
-async function fetchBulkAsOf(accounts: readonly string[]): Promise<string | undefined> {
+async function fetchBulkAsOf(
+  accounts: readonly string[]
+): Promise<string | undefined> {
   const list = Array.from(new Set(accounts.filter(Boolean)));
   if (list.length === 0) return undefined;
   const params = new URLSearchParams({ accounts: list.join(",") });
-  const json = await fetchJsonRetry<BulkAsOfPayload>(`/api/metrics/bulk?${params.toString()}`);
+  const json = await fetchJsonRetry<BulkAsOfPayload>(
+    `/api/metrics/bulk?${params.toString()}`
+  );
   return json?.uPnl?.as_of;
 }
 
 export function Navbar() {
   const router = useRouter();
-  const { navbarVisible, analyticsSelectedAccounts, analyticsAccounts } = usePrefs();
+  const { navbarVisible, analyticsSelectedAccounts, analyticsAccounts } =
+    usePrefs();
+  const [asOf, setAsOf] = React.useState<string | undefined>(undefined);
 
-  const [asOf, setAsOf] = useState<string | undefined>(undefined);
-
-  const accountsKey = useMemo<string>(() => {
-    const uniq = Array.from(new Set((analyticsSelectedAccounts ?? []).filter(Boolean)));
+  // fallback to fund2,fund3
+  const effectiveAccounts = React.useMemo(
+    () =>
+      analyticsSelectedAccounts?.length
+        ? analyticsSelectedAccounts
+        : ["fund2", "fund3"],
+    [analyticsSelectedAccounts]
+  );
+  const accountsKey = React.useMemo(() => {
+    const uniq = Array.from(new Set(effectiveAccounts));
     uniq.sort();
     return uniq.join(",");
-  }, [analyticsSelectedAccounts]);
+  }, [effectiveAccounts]);
 
-  const pollIdRef = useRef<number | null>(null);
-  const lastKeyRef = useRef<string>("");
-
-  const doFetch = useCallback(async (): Promise<void> => {
+  // poll freshness every 5s (interval restarts when accounts change)
+  const pollIdRef = React.useRef<number | null>(null);
+  const lastKeyRef = React.useRef<string>("");
+  const doFetch = React.useCallback(async () => {
     if (!accountsKey) return;
     const list = accountsKey.split(",").filter(Boolean);
     const iso = await fetchBulkAsOf(list).catch(() => undefined);
     if (iso != null) setAsOf(iso);
   }, [accountsKey]);
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (!accountsKey) return;
-
-    // If key unchanged and polling already running, no-op
     if (lastKeyRef.current === accountsKey && pollIdRef.current != null) return;
     lastKeyRef.current = accountsKey;
 
-    // Reset any prior poller
     if (pollIdRef.current != null) {
       window.clearInterval(pollIdRef.current);
       pollIdRef.current = null;
     }
 
-    // Immediate fetch + poll every 5s
     void doFetch();
-    const id = window.setInterval(() => { void doFetch(); }, 5000);
+    const id = window.setInterval(() => {
+      void doFetch();
+    }, 5000);
     pollIdRef.current = id;
 
     return () => {
@@ -135,10 +150,7 @@ export function Navbar() {
   const brandHref = "/analytics";
 
   return (
-    <header
-      className="sticky top-0 z-40 w-full border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60"
-      role="banner"
-    >
+    <header className="sticky top-0 z-40 w-full border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="mx-auto max-w-[1600px] px-3 h-12 flex items-center gap-3">
         <Link
           href={brandHref}
@@ -148,7 +160,7 @@ export function Navbar() {
           {brandTitle}
         </Link>
 
-        {/* LIVE freshness pill */}
+        {/* freshness pill */}
         <span
           className={[
             "ml-2 inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[11px] border",
@@ -174,7 +186,8 @@ export function Navbar() {
 
         <div className="ml-auto flex items-center gap-2">
           {/* Accounts selector */}
-          {Array.isArray(analyticsAccounts) && (analyticsAccounts?.length ?? 0) > 0 ? (
+          {Array.isArray(analyticsAccounts) &&
+          (analyticsAccounts?.length ?? 0) > 0 ? (
             <AccountsDialog />
           ) : (
             <button
@@ -187,15 +200,60 @@ export function Navbar() {
             </button>
           )}
 
-          {/* Global settings menu */}
-          <ControlsMenu
-            account="analytics"
-            onChangeAccount={(a) => router.push(`/dashboard/${a}`)}
-            triggerClassName="h-9 w-9"
-            triggerIcon={<Settings className="h-4 w-4" aria-hidden />}
-          />
+          {/* Theme menu (direct, no config button) */}
+          <ThemeMenu />
         </div>
       </div>
     </header>
+  );
+}
+
+function ThemeMenu() {
+  const { theme, setTheme, systemTheme } = useTheme();
+  const [open, setOpen] = React.useState(false);
+
+  const opts: { key: string; label: string }[] = [
+    { key: "light", label: "Light" },
+    { key: "dark", label: "Dark" },
+    { key: "system", label: `System${systemTheme ? ` (${systemTheme})` : ""}` },
+  ];
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="h-9 w-9 inline-flex items-center justify-center rounded-md border hover:bg-accent"
+        title="Theme"
+      >
+        <SunMoon className="h-4 w-4" />
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 mt-2 w-40 rounded-md border bg-popover shadow-lg p-1 text-sm"
+          onMouseLeave={() => setOpen(false)}
+        >
+          {opts.map((o) => (
+            <button
+              key={o.key}
+              role="menuitemradio"
+              aria-checked={theme === o.key}
+              className="w-full flex items-center justify-between px-2 py-1.5 rounded hover:bg-accent"
+              onClick={() => {
+                setTheme(o.key);
+                setOpen(false);
+              }}
+            >
+              <span>{o.label}</span>
+              {theme === o.key ? <Check className="h-4 w-4" /> : null}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

@@ -6,7 +6,6 @@ import pandas as pd
 
 from ..io import load_accounts, read_account_trades
 
-
 def compute_symbol_pnl_mtd(
     *,
     override_accounts: Optional[List[str]] = None,

@@ -1,137 +1,151 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import type { Account } from "@/app/(analytics)/analytics/lib/performance_metric_types";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
-export type IsoDate = string;
-export type AnalyticsRange = { start?: IsoDate; end?: IsoDate };
+const PrefsContext = createContext(undefined);
 
-export type Prefs = {
-  navbarVisible: boolean;
-  setNavbarVisible: (b: boolean) => void;
+// ---------- helpers ----------
+async function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
-  accessiblePalette: boolean;
-  setAccessiblePalette: (b: boolean) => void;
-
-  analyticsRange: AnalyticsRange;
-  setAnalyticsRange: (r: AnalyticsRange) => void;
-
-  analyticsEarliest: boolean;
-  setAnalyticsEarliest: (b: boolean) => void;
-
-  analyticsSelectedAccounts: string[];
-  setAnalyticsSelectedAccounts: (ids: string[]) => void;
-
-  analyticsAccounts: Account[];
-  setAnalyticsAccounts: (a: Account[]) => void;
-
-  analyticsLoading: boolean;
-  setAnalyticsLoading: (b: boolean) => void;
-};
-
-const Ctx = createContext<Prefs | null>(null);
-
-/* ---------------- localStorage helper ---------------- */
-function useLocalStorage<T>(key: string, initial: T) {
-  const [value, setValue] = useState<T>(() => {
+async function fetchAccounts(retries = 3, backoffMs = 300) {
+  let lastErr;
+  for (let i = 0; i <= retries; i += 1) {
     try {
-      const raw = localStorage.getItem(key);
-      return raw ? (JSON.parse(raw) as T) : initial;
-    } catch {
-      return initial;
+      const res = await fetch("/api/accounts", { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+      const json = await res.json();
+
+      // Accept either an array or { accounts: [...] }
+      const arr = Array.isArray(json)
+        ? json
+        : Array.isArray(json?.accounts)
+          ? json.accounts
+          : [];
+
+      return arr
+        .map((a) => ({
+          redisName: String(a?.redisName ?? "").trim(),
+          display: a?.display ?? null,
+          monitored: Boolean(a?.monitored),
+        }))
+        .filter((a) => !!a.redisName);
+    } catch (e) {
+      lastErr = e;
+      if (i < retries) await sleep(backoffMs * 2 ** i);
     }
-  });
+  }
+  throw lastErr || new Error("accounts fetch failed");
+}
+
+function defaultSelected(accounts) {
+  const names = new Set(accounts.map((a) => a.redisName));
+  if (names.has("fund2") && names.has("fund3")) return ["fund2", "fund3"];
+  const preferred = accounts.filter((a) => a.monitored).slice(0, 2);
+  const pool = preferred.length ? preferred : accounts.slice(0, 2);
+  return pool.map((a) => a.redisName);
+}
+
+// ---------- provider ----------
+export function PrefsProvider({ children }) {
+  const [analyticsAccounts, setAnalyticsAccounts] = useState([]);
+  const [analyticsSelectedAccounts, setAnalyticsSelectedAccounts] = useState([
+    "fund2",
+    "fund3",
+  ]);
+  const [analyticsLoading, setAnalyticsLoading] = useState(true);
+
+  // Optional date range state (your components expect these)
+  const [analyticsRange, setAnalyticsRange] = useState({});
+  const [analyticsEarliest, setAnalyticsEarliest] = useState(false);
+
+  // Navbar flag used in your code
+  const navbarVisible = true;
+
+  const mountedRef = useRef(false);
+
+  const load = async () => {
+    setAnalyticsLoading(true);
+    try {
+      const list = await fetchAccounts();
+      setAnalyticsAccounts(list);
+
+      setAnalyticsSelectedAccounts((prev) => {
+        if (prev && prev.length > 0) {
+          const allowed = new Set(list.map((a) => a.redisName));
+          const filtered = prev.filter((x) => allowed.has(x));
+          return filtered.length > 0 ? filtered : defaultSelected(list);
+        }
+        return defaultSelected(list);
+      });
+    } catch {
+      // Fallback so dialog stays clickable
+      const fallback = [
+        { redisName: "fund2", display: "Fund 2", monitored: true },
+        { redisName: "fund3", display: "Fund 3", monitored: true },
+      ];
+      setAnalyticsAccounts(fallback);
+      setAnalyticsSelectedAccounts((prev) =>
+        prev.length ? prev : ["fund2", "fund3"]
+      );
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  };
+
+  const reloadAccounts = async () => {
+    await load();
+  };
+
   useEffect(() => {
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-    } catch {
-      /* ignore quota/SSR issues */
-    }
-  }, [key, value]);
-  return [value, setValue] as const;
-}
+    if (mountedRef.current) return;
+    mountedRef.current = true;
+    load();
+  }, []);
 
-/* ---------------- date helpers (local calendar, no TZ gymnastics) --------- */
-function pad2(n: number): string {
-  return n < 10 ? `0${n}` : String(n);
-}
-function toISODateLocal(d: Date): string {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
-function mtdDefault(): AnalyticsRange {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-  return { start: toISODateLocal(start), end: toISODateLocal(now) };
-}
-/* ------------------------------------------------------------------------- */
-
-export function PrefsProvider({ children }: { children: React.ReactNode }) {
-  // minimal UI prefs
-  const [navbarVisible, setNavbarVisible] = useLocalStorage<boolean>(
-    "af_navbar_visible",
-    true
-  );
-  const [accessiblePalette, setAccessiblePalette] = useLocalStorage<boolean>(
-    "af_bright_bars",
-    false
-  );
-
-  // analytics filters (persisted) — default to MTD
-  const [analyticsRange, setAnalyticsRange] = useLocalStorage<AnalyticsRange>(
-    "af_analytics_range",
-    mtdDefault()
-  );
-  const [analyticsEarliest, setAnalyticsEarliest] = useLocalStorage<boolean>(
-    "af_analytics_earliest",
-    false
-  );
-  const [analyticsSelectedAccounts, setAnalyticsSelectedAccounts] =
-    useLocalStorage<string[]>("af_analytics_selected", []);
-
-  // analytics runtime (non-persisted)
-  const [analyticsAccounts, setAnalyticsAccounts] = useState<Account[]>([]);
-  const [analyticsLoading, setAnalyticsLoading] = useState<boolean>(false);
-
-  const value = useMemo<Prefs>(
+  const value = useMemo(
     () => ({
+      // UI flags
       navbarVisible,
-      setNavbarVisible,
-      accessiblePalette,
-      setAccessiblePalette,
 
+      // Accounts
+      analyticsAccounts,
+      analyticsSelectedAccounts,
+      setAnalyticsSelectedAccounts,
+      analyticsLoading,
+      reloadAccounts,
+
+      // Range (kept for compatibility with your components)
       analyticsRange,
       setAnalyticsRange,
       analyticsEarliest,
       setAnalyticsEarliest,
-      analyticsSelectedAccounts,
-      setAnalyticsSelectedAccounts,
-
-      analyticsAccounts,
-      setAnalyticsAccounts,
-      analyticsLoading,
-      setAnalyticsLoading,
     }),
     [
       navbarVisible,
-      setNavbarVisible,
-      accessiblePalette,
-      setAccessiblePalette,
-      analyticsRange,
-      setAnalyticsRange,
-      analyticsEarliest,
-      setAnalyticsEarliest,
-      analyticsSelectedAccounts,
-      setAnalyticsSelectedAccounts,
       analyticsAccounts,
+      analyticsSelectedAccounts,
       analyticsLoading,
+      analyticsRange,
+      analyticsEarliest,
     ]
   );
 
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  return (
+    <PrefsContext.Provider value={value}>{children}</PrefsContext.Provider>
+  );
 }
 
-export function usePrefs(): Prefs {
-  const ctx = useContext(Ctx);
-  if (!ctx) throw new Error("usePrefs must be used inside PrefsProvider");
+export function usePrefs() {
+  const ctx = useContext(PrefsContext);
+  if (!ctx) throw new Error("usePrefs must be used within PrefsProvider");
   return ctx;
 }

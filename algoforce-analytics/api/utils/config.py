@@ -30,6 +30,10 @@ BALANCE_SCHEMA: Final[str] = os.getenv("BALANCE_SCHEMA", "balance")
 BALANCE_TIME_COLUMN: Final[str] = os.getenv("BALANCE_TIME_COLUMN", "datetime")
 BALANCE_VALUE_COLUMN: Final[str] = os.getenv("BALANCE_VALUE_COLUMN", "overall_balance")
 
+# Other schemas used for the ledger (defaults match your notebook)
+TRANSACTION_SCHEMA: Final[str] = os.getenv("TRANSACTION_SCHEMA", "transaction_history")
+EARNINGS_SCHEMA:    Final[str] = os.getenv("EARNINGS_SCHEMA", "earnings")
+
 # ---------------- Factories (cached) ----------------
 
 @lru_cache(maxsize=1)
