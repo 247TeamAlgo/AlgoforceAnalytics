@@ -186,18 +186,18 @@ export default function PerformanceMetricClient({
           alignItems: "start",
         }}
       >
-        {/* LEFT: Combined Performance + Symbol PnL + raw JSON */}
+        {/* LEFT: row with two half-width cards, then raw JSON below */}
         <div className="space-y-4">
-          <CombinedPerformanceMTDCard
-            // The card understands this “bulk-like” object
-            // (If your card has stricter types, keep this cast.)
-            bulk={combinedBulk}
-            selected={accounts}
-            combinedUpnl={payload?.uPnl?.combined ?? 0}
-          />
-
-          {/* Pass rows only; NetPnlList scales to all rows automatically */}
-          <NetPnlList rows={symbolRows} />
+          {/* Row: Combined Performance + Symbol Net PnL side-by-side */}
+          <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
+            <CombinedPerformanceMTDCard
+              // If your card expects a stricter type, keep this cast mild.
+              bulk={combinedBulk as any}
+              selected={accounts}
+              combinedUpnl={payload?.uPnl?.combined ?? 0}
+            />
+            <NetPnlList rows={symbolRows} />
+          </div>
 
           {/* Raw payload (leeway) */}
           <div className="rounded-lg border bg-muted/30 p-3 text-sm font-mono overflow-auto">
@@ -215,9 +215,7 @@ export default function PerformanceMetricClient({
             ) : null}
             <pre className="mt-2">{pretty}</pre>
             {loading ? (
-              <div className="mt-2 text-xs text-muted-foreground">
-                fetching…
-              </div>
+              <div className="mt-2 text-xs text-muted-foreground">fetching…</div>
             ) : null}
           </div>
         </div>

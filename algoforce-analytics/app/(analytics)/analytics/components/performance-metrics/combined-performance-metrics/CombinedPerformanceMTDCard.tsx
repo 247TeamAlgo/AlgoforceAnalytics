@@ -1,3 +1,4 @@
+// app/(analytics)/analytics/components/performance-metrics/combined-performance-metrics/CombinedPerformanceMTDCard.tsx
 "use client";
 
 import {
@@ -8,7 +9,7 @@ import {
     CardTitle,
 } from "@/components/ui/card";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { DrawdownChart } from "./DrawdownChart";
+import DrawdownChart from "./DrawdownChart";
 import { HeaderBadges } from "./HeaderBadges";
 import {
     computeSeriesOverWindow
@@ -119,7 +120,6 @@ export default function CombinedPerformanceMTDCard({
         <DrawdownChart
           realizedDD={realizedDD}
           marginDD={marginDD}
-          containerWidth={wrapW}
         />
         <ReturnChart
           realizedReturn={realizedReturn}
