@@ -154,15 +154,21 @@ export default function NetPnlList({ rows }: Props) {
   return (
     <Card className="py-0">
       <CardHeader className="border-b !p-0">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0 px-6 pt-4 sm:py-3">
-            <CardTitle>Symbol Net PnL</CardTitle>
-            <CardDescription className="mt-0.5">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between">
+          <div
+            className="
+              min-w-0 px-6 pt- sm:py-3
+              grid grid-rows-[auto_auto_auto] gap-2
+            "
+          >
+            <CardTitle className="leading-tight">Symbol Net PnL</CardTitle>
+
+            <CardDescription className="text-sm leading-snug">
               Realized net per symbol
             </CardDescription>
 
             {/* header badges */}
-            <div className="mt-2 flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-">
               {/* Total */}
               <span className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs">
                 <span

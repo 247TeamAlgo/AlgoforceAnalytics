@@ -12,10 +12,8 @@ import CombinedPerformanceMTDCard from "./performance-metrics/combined-performan
 import NetPnlList from "./performance-metrics/symbol-pnl/NetPnlList";
 import type { BulkMetricsResponse } from "./performance-metrics/combined-performance-metrics/types";
 
-/** Props aligned with your Page wiring */
 export type PerformanceMetricsPayload = {
   window?: { startDay?: string; endDay?: string; mode?: string };
-
   balances?: { realized?: Record<string, Record<string, number>> };
   balance?: Record<string, Record<string, number>>;
   balancePreUpnl?: Record<string, Record<string, number>>;
@@ -31,15 +29,12 @@ export type PerformanceMetricsPayload = {
   combinedLiveMonthlyDrawdown?: { total?: number };
   combinedLiveMonthlyReturnWithUpnl?: { total?: number };
   combinedLiveMonthlyDrawdownWithUpnl?: { total?: number };
-
   symbolRealizedPnl?: { symbols?: Record<string, Record<string, number>> };
-
   uPnl?: {
     as_of?: string;
     combined?: number;
     perAccount?: Record<string, number>;
   };
-
   losingDays?: Record<string, { consecutive?: number; max?: number }>;
 };
 
@@ -121,7 +116,7 @@ export default function PerformanceMetricClient({
     }
   }, [payload]);
 
-  /* ---------- Build a “bulk-like” object for Combined card ---------- */
+  /* ---------- Combined bulk ---------- */
   const combinedBulk: BulkMetricsResponse = useMemo(() => {
     const realized =
       payload?.balances?.realized ?? payload?.balance ?? undefined;
@@ -163,14 +158,12 @@ export default function PerformanceMetricClient({
 
   return (
     <div className="space-y-4">
-      {/* TOP: UpnL strip (full width) */}
       <LiveUpnlStrip
         combined={combinedFiltered}
         perAccount={perFiltered}
         maxAccounts={12}
       />
 
-      {/* MAIN GRID: Left content + 10% right losing-days (spans 2 rows) */}
       <div
         className="grid gap-4"
         style={{
@@ -178,9 +171,7 @@ export default function PerformanceMetricClient({
           alignItems: "start",
         }}
       >
-        {/* LEFT: row with two half-width cards, then collapsible dev tool */}
         <div className="space-y-4">
-          {/* Row: Combined Performance + Symbol Net PnL side-by-side */}
           <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
             <CombinedPerformanceMTDCard
               bulk={combinedBulk}
@@ -191,7 +182,7 @@ export default function PerformanceMetricClient({
           </div>
 
           {/* Developer’s Tool (collapsible) */}
-          <div className="rounded-lg border">
+          <div className="rounded-lg border bg-card text-card-foreground">
             <button
               type="button"
               onClick={() => setDevOpen((v) => !v)}
@@ -210,10 +201,12 @@ export default function PerformanceMetricClient({
                 }`}
               />
             </button>
+
             <div className="h-px w-full bg-border" />
+
             <div
               className={`transition-[max-height,opacity] duration-200 ease-out overflow-hidden ${
-                devOpen ? "opacity-100 max-h-[1200px]" : "opacity-0 max-h-0"
+                devOpen ? "opacity-100 max-h-[600px]" : "opacity-0 max-h-0"
               }`}
             >
               <div className="p-3 sm:p-4 text-sm font-mono bg-muted/30">
@@ -232,7 +225,12 @@ export default function PerformanceMetricClient({
                   </div>
                 ) : null}
 
-                <pre className="mt-2 overflow-auto">{pretty}</pre>
+                {/* Scrollable JSON container */}
+                <div className="mt-2 max-h-[400px] overflow-y-auto rounded border bg-background px-3 py-2">
+                  <pre className="text-xs whitespace-pre-wrap break-all">
+                    {pretty}
+                  </pre>
+                </div>
 
                 {loading ? (
                   <div className="mt-2 text-xs text-muted-foreground">
@@ -244,7 +242,6 @@ export default function PerformanceMetricClient({
           </div>
         </div>
 
-        {/* RIGHT: Losing-days list (2x taller) */}
         <div className="row-span-2">
           <ConsecutiveLosingDaysCard
             perAccounts={perAccounts}

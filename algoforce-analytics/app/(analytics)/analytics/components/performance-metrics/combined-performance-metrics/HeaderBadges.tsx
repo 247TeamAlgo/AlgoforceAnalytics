@@ -16,7 +16,7 @@ export function HeaderBadges({
 }) {
   const deltaPositive = deltaBal >= 0;
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <span className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs">
         <span
           className="h-2.5 w-2.5 rounded-[3px]"

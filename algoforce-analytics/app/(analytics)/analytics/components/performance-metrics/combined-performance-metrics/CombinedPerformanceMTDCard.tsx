@@ -100,18 +100,27 @@ export default function CombinedPerformanceMTDCard({
   }, []);
 
   return (
-    <Card className="w-full">
+    <Card className="py-0">
       <CardHeader className="border-b !p-0">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0 px-6 pt-4 sm:py-3">
-            <CardTitle>Combined Performance — MTD</CardTitle>
-            <CardDescription className="mt-0.5">{windowLabel}</CardDescription>
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between">
+          <div
+            className="
+              min-w-0 px-6 pt-2 sm:py-3
+              grid grid-rows-[auto_auto_auto] gap-2
+            "
+          >
+            <CardTitle className="leading-tight">Combined Performance — MTD</CardTitle>
+            <CardDescription className="text-sm leading-snug">
+              {windowLabel}
+            </CardDescription>
 
-            <HeaderBadges
-              totalBal={totalBal}
-              startBal={startBal}
-              deltaBal={deltaBal}
-            />
+            <div className="flex flex-wrap items-center gap-2">
+              <HeaderBadges
+                totalBal={totalBal}
+                startBal={startBal}
+                deltaBal={deltaBal}
+              />
+            </div>
           </div>
         </div>
       </CardHeader>
