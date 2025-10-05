@@ -62,11 +62,12 @@ export default function NetPnlList({ rows }: Props) {
 
   /* sort: positives first (by % desc), then negatives/zeros (by % desc) */
   const sorted = useMemo<RowDatum[]>(() => {
-    const pos = data.filter((d) => d.sign === "pos").sort((a, b) => b.fillPct - a.fillPct);
-    const nonPos = data
-      .filter((d) => d.sign !== "pos")
-      .sort((a, b) => b.fillPct - a.fillPct);
-    return [...pos, ...nonPos];
+    const pos  = data.filter(d => d.sign === "pos")
+                    .sort((a, b) => b.fillPct - a.fillPct);
+    const neg  = data.filter(d => d.sign === "neg")
+                    .sort((a, b) => a.fillPct - b.fillPct); // reverse
+    const zero = data.filter(d => d.sign === "zero");
+    return [...pos, ...neg, ...zero];
   }, [data]);
 
   /* header stats */
