@@ -1,6 +1,5 @@
 "use client";
 
-import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Card,
   CardContent,
@@ -9,6 +8,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { TrendingDown, TrendingUp } from "lucide-react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Bucket } from "./types";
 
 /* ---------- colors & formatters ---------- */
@@ -62,11 +62,13 @@ export default function NetPnlList({ rows }: Props) {
 
   /* sort: positives first (by % desc), then negatives/zeros (by % desc) */
   const sorted = useMemo<RowDatum[]>(() => {
-    const pos  = data.filter(d => d.sign === "pos")
-                    .sort((a, b) => b.fillPct - a.fillPct);
-    const neg  = data.filter(d => d.sign === "neg")
-                    .sort((a, b) => a.fillPct - b.fillPct); // reverse
-    const zero = data.filter(d => d.sign === "zero");
+    const pos = data
+      .filter((d) => d.sign === "pos")
+      .sort((a, b) => b.fillPct - a.fillPct);
+    const neg = data
+      .filter((d) => d.sign === "neg")
+      .sort((a, b) => a.fillPct - b.fillPct); // reverse
+    const zero = data.filter((d) => d.sign === "zero");
     return [...pos, ...neg, ...zero];
   }, [data]);
 
@@ -99,7 +101,8 @@ export default function NetPnlList({ rows }: Props) {
 
     const measure = (): void => {
       // 1) measure the numbers width (max across rows)
-      const numNodes = root.querySelectorAll<HTMLDivElement>('[data-role="nums"]');
+      const numNodes =
+        root.querySelectorAll<HTMLDivElement>('[data-role="nums"]');
       let maxW = 0;
       numNodes.forEach((n) => {
         const w = n.getBoundingClientRect().width;
@@ -170,9 +173,9 @@ export default function NetPnlList({ rows }: Props) {
             {/* header badges */}
             <div className="flex flex-wrap items-center gap-">
               {/* Total */}
-              <span className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs">
+              <span className="inline-flex items-center gap-2 border px-2 py-1 text-xs">
                 <span
-                  className="h-2.5 w-2.5 rounded-[3px]"
+                  className="h-2.5 w-2.5"
                   style={{ backgroundColor: "var(--muted-foreground)" }}
                 />
                 <span className="text-muted-foreground">Total</span>
@@ -182,9 +185,9 @@ export default function NetPnlList({ rows }: Props) {
               </span>
 
               {/* Highest */}
-              <span className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs">
+              <span className="inline-flex items-center gap-2 border px-2 py-1 text-xs">
                 <span
-                  className="h-2.5 w-2.5 rounded-[3px]"
+                  className="h-2.5 w-2.5"
                   style={{ backgroundColor: POS }}
                 />
                 <TrendingUp className="h-3.5 w-3.5" style={{ color: POS }} />
@@ -197,9 +200,9 @@ export default function NetPnlList({ rows }: Props) {
               </span>
 
               {/* Lowest */}
-              <span className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs">
+              <span className="inline-flex items-center gap-2 border px-2 py-1 text-xs">
                 <span
-                  className="h-2.5 w-2.5 rounded-[3px]"
+                  className="h-2.5 w-2.5"
                   style={{ backgroundColor: NEG }}
                 />
                 <TrendingDown className="h-3.5 w-3.5" style={{ color: NEG }} />
@@ -217,7 +220,9 @@ export default function NetPnlList({ rows }: Props) {
 
       <CardContent className="px-3 sm:px-4 pb-3 sm:pb-4">
         {sorted.length === 0 ? (
-          <div className="text-sm text-muted-foreground px-4 py-8">No data.</div>
+          <div className="text-sm text-muted-foreground px-4 py-8">
+            No data.
+          </div>
         ) : (
           <ul ref={listRef} className="divide-y">
             {sorted.map((d) => {
@@ -226,8 +231,8 @@ export default function NetPnlList({ rows }: Props) {
                 d.sign === "pos"
                   ? "text-emerald-500"
                   : d.sign === "neg"
-                  ? "text-red-500"
-                  : "text-muted-foreground";
+                    ? "text-red-500"
+                    : "text-muted-foreground";
 
               const halfFillPct = Math.min(50, (d.fillPct * 0.5) / 100) * 100; // 0..50 in %
               return (
@@ -245,16 +250,16 @@ export default function NetPnlList({ rows }: Props) {
                   {/* Bar track (thicker) */}
                   <div
                     data-role="bartrack"
-                    className="relative h-[10px] flex-1 rounded-full bg-foreground/10"
+                    className="relative h-[10px] flex-1 bg-foreground/10"
                   >
                     {isPos ? (
                       <div
-                        className="absolute inset-y-0 left-1/2 rounded-r-full"
+                        className="absolute inset-y-0 left-1/2"
                         style={{ width: `${halfFillPct}%`, background: POS }}
                       />
                     ) : d.sign === "neg" ? (
                       <div
-                        className="absolute inset-y-0 left-1/2 -translate-x-full rounded-l-full"
+                        className="absolute inset-y-0 left-1/2 -translate-x-full"
                         style={{ width: `${halfFillPct}%`, background: NEG }}
                       />
                     ) : null}

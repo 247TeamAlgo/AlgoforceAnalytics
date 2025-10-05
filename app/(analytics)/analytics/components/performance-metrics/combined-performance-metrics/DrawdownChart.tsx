@@ -69,7 +69,7 @@ export default function DrawdownChart({
   const DASH_UP_OVER_MARGIN = 4; // small lift; change to match realized if you want
 
   return (
-    <div className="rounded-xl border bg-card/40 p-3 mb-5">
+    <div className="rounded-[2px] border bg-card/40 p-3 mb-5">
       <div className="mb-2 text-sm sm:text-base font-medium text-foreground">
         Drawdown (MTD)
       </div>
@@ -127,13 +127,13 @@ export default function DrawdownChart({
               <div className="relative">
                 {/* Track */}
                 <div
-                  className="w-full rounded-full bg-muted"
+                  className="w-full rounded-[2px] bg-muted"
                   style={{ height: `${barHeight}px` }}
                 />
 
                 {/* Fill (0 → right) */}
                 <div
-                  className="absolute left-0 top-0 rounded-full"
+                  className="absolute left-0 top-0 rounded-[2px]"
                   style={{
                     height: `${barHeight}px`,
                     width: `${widthPct}%`,
