@@ -1,4 +1,3 @@
-// app/(analytics)/analytics/components/performance-metrics/symbol-net/NetPnlList.tsx
 "use client";
 
 import {
@@ -14,9 +13,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { BarChart3, TrendingDown, TrendingUp } from "lucide-react";
+import { TrendingDown, TrendingUp } from "lucide-react";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Bucket } from "./types";
+import type { Bucket, SymbolBreakdownMap } from "./types";
 import { METRICS_COLORS } from "../combined-performance-metrics/helpers";
 
 /* ---------------------------- formatters ---------------------------- */
@@ -53,11 +52,28 @@ type Props = {
   rows: Bucket[]; // [{ label, total, accounts? }]
   /** Basis for Total % (e.g., startBal or live total). Falls back to sum(|PnL|) if absent. */
   totalBasis?: number;
+
+  /**
+   * Selected accounts to display in the tooltip composition.
+   * If provided, their order is preserved in the tooltip.
+   */
+  selectedAccounts?: string[];
+
+  /**
+   * Raw per-symbol breakdown map (from API).
+   * Used to compute composition when rows[].accounts is not provided.
+   */
+  symbolBreakdownMap?: SymbolBreakdownMap;
 };
 
 /* ------------------------------ component ------------------------------ */
 
-export default function NetPnlList({ rows, totalBasis }: Props) {
+export default function NetPnlList({
+  rows,
+  totalBasis,
+  selectedAccounts,
+  symbolBreakdownMap,
+}: Props) {
   const data = useMemo<RowDatum[]>(() => {
     const list = (rows ?? []).slice();
 
@@ -99,11 +115,13 @@ export default function NetPnlList({ rows, totalBasis }: Props) {
   const sorted = useMemo<RowDatum[]>(() => {
     const pos = data
       .filter((d) => d.sign === "pos")
-      .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+      .sort((a, b) => Math.abs(b.value) - Math.abs(a.value)); // winners by impact
+
     const neg = data
       .filter((d) => d.sign === "neg")
-      .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
-    const zero = data.filter((d) => d.sign === "zero");
+      .sort((a, b) => b.value - a.value); // decreasing for negatives: -50, -500, -1000
+
+    const zero = data.filter((d) => d.sign === "zero"); // keep neutral at the end
     return [...pos, ...neg, ...zero];
   }, [data]);
 
@@ -152,6 +170,59 @@ export default function NetPnlList({ rows, totalBasis }: Props) {
       ro.disconnect();
     };
   }, [sorted]);
+
+  /* ------------------------------- helpers ------------------------------- */
+
+  const safeNum = (v: unknown): number =>
+    typeof v === "number" && Number.isFinite(v) ? v : Number(v ?? 0) || 0;
+
+  type Entry = { k: string; v: number };
+
+  function deriveEntriesForRow(d: RowDatum): Entry[] {
+    // 1) Prefer explicit per-row accounts if provided
+    if (d.accounts && Object.keys(d.accounts).length > 0) {
+      if (selectedAccounts && selectedAccounts.length > 0) {
+        return selectedAccounts.map((a) => ({ k: a, v: safeNum(d.accounts![a]) }));
+      }
+      // No selection provided → alphabetical, stable
+      return Object.keys(d.accounts)
+        .sort()
+        .map((k) => ({ k, v: safeNum(d.accounts![k]) }));
+    }
+
+    // 2) Otherwise, derive from symbolBreakdownMap using selectedAccounts if provided
+    const raw = symbolBreakdownMap?.[d.label];
+    if (raw) {
+      if (selectedAccounts && selectedAccounts.length > 0) {
+        return selectedAccounts.map((a) => ({ k: a, v: safeNum(raw[a]) }));
+      }
+      // No selection → include all numeric keys except TOTAL/total, alphabetical
+      return Object.keys(raw)
+        .filter((k) => k.toLowerCase() !== "total")
+        .sort()
+        .map((k) => ({ k, v: safeNum(raw[k]) }));
+    }
+
+    // 3) Nothing to show
+    return [];
+  }
+
+  function compositionBasis(d: RowDatum, entries: Entry[]): number {
+    const sumSelected = entries.reduce((s, x) => s + x.v, 0);
+    if (sumSelected !== 0) return sumSelected;
+
+    // If sum of selected is 0, try symbol TOTAL from map
+    const raw = symbolBreakdownMap?.[d.label];
+    if (raw) {
+      const totalLike = raw["TOTAL"] ?? raw["total"];
+      const maybe = safeNum(totalLike);
+      if (maybe !== 0) return maybe;
+    }
+
+    // Fall back to the row value, then guard
+    if (d.value !== 0) return d.value;
+    return 1;
+  }
 
   /* ------------------------------- render ------------------------------- */
 
@@ -234,10 +305,9 @@ export default function NetPnlList({ rows, totalBasis }: Props) {
                 // HARD CAP at 100% of the whole track. This guarantees no overshoot.
                 const widthPct = Math.min(Math.abs(d.totalPct), 100);
 
-                const accounts = d.accounts ?? {};
-                const acctEntries = Object.keys(accounts)
-                  .sort()
-                  .map((k) => ({ k, v: Number(accounts[k] || 0) }));
+                // Build dynamic composition entries
+                const entries = deriveEntriesForRow(d);
+                const basis = compositionBasis(d, entries);
 
                 return (
                   <Tooltip key={d.id}>
@@ -265,7 +335,7 @@ export default function NetPnlList({ rows, totalBasis }: Props) {
                           {/* Positive leg (right from center) */}
                           {isPos && (
                             <div
-                              className={`absolute inset-y-0 left-1/2 bg-emerald-500 rounded-r-[2px]`}
+                              className="absolute inset-y-0 left-1/2 bg-emerald-500 rounded-r-[2px]"
                               style={{
                                 width: `${widthPct}%`,
                                 opacity: FILL_OPACITY,
@@ -276,7 +346,7 @@ export default function NetPnlList({ rows, totalBasis }: Props) {
                           {/* Negative leg (left from center) */}
                           {d.sign === "neg" && (
                             <div
-                              className={`absolute inset-y-0 left-1/2 -translate-x-full bg-red-500 rounded-l-[2px]`}
+                              className="absolute inset-y-0 left-1/2 -translate-x-full bg-red-500 rounded-l-[2px]"
                               style={{
                                 width: `${widthPct}%`,
                                 opacity: FILL_OPACITY,
@@ -288,7 +358,7 @@ export default function NetPnlList({ rows, totalBasis }: Props) {
                         {/* Numbers — fixed right column (outside bars), tinted green/red */}
                         <div
                           data-role="nums"
-                          className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center justify-end gap-2 tabular-nums text-[11px] sm:text-xs text-right"
+                          className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center justify-start gap-2 tabular-nums text-[11px] sm:text-xs text-left pl-2"
                           style={{ width: numsWidth }}
                         >
                           <span className={valueCls}>{pct2(d.totalPct)}</span>
@@ -297,7 +367,7 @@ export default function NetPnlList({ rows, totalBasis }: Props) {
                       </li>
                     </TooltipTrigger>
 
-                    {/* Tooltip — shadcn surface, values tinted by sign */}
+                    {/* Tooltip — totals + dynamic composition */}
                     <TooltipContent
                       align="end"
                       side="top"
@@ -311,8 +381,13 @@ export default function NetPnlList({ rows, totalBasis }: Props) {
                         <span className="text-muted-foreground">Total %</span>
                         <span className={valueCls}>{pct2(d.totalPct)}</span>
 
-                        {acctEntries.map(({ k, v }) => (
-                          <FragmentRow key={k} k={k} v={v} />
+                        {entries.map(({ k, v }) => (
+                          <AccountRow
+                            key={k}
+                            label={k}
+                            value={v}
+                            pct={(v / basis) * 100}
+                          />
                         ))}
                       </div>
                     </TooltipContent>
@@ -328,17 +403,28 @@ export default function NetPnlList({ rows, totalBasis }: Props) {
 }
 
 /* Split out for functional style & typing */
-function FragmentRow({ k, v }: { k: string; v: number }) {
-  const cls =
-    v > 0
+function AccountRow({
+  label,
+  value,
+  pct,
+}: {
+  label: string;
+  value: number;
+  pct: number;
+}) {
+  const vCls =
+    value > 0
       ? "text-emerald-500"
-      : v < 0
+      : value < 0
         ? "text-red-500"
         : "text-muted-foreground";
   return (
     <>
-      <span className="text-muted-foreground">{k}</span>
-      <span className={cls}>{usd(v)}</span>
+      <span className="text-muted-foreground">{label}</span>
+      <span className={vCls}>
+        {usd(value)}{" "}
+        <span className="text-muted-foreground">({pct2(pct)})</span>
+      </span>
     </>
   );
 }

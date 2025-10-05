@@ -19,6 +19,27 @@ type Level = { value: number; label?: string };
 type RowSpec = { label: string; color: string; value: number };
 type Tick = { v: number; label: string; i?: number };
 
+export type DrawdownChartProps = {
+  realizedDD: number;
+  marginDD: number;
+
+  /** Per-account breakdowns for realized and margin drawdown (fractions). */
+  realizedBreakdown?: Record<string, number>;
+  marginBreakdown?: Record<string, number>;
+
+  /** Selected accounts; order is preserved in tooltips. */
+  selectedAccounts?: string[];
+
+  levels?: Level[];
+  levelColors?: string[];
+  upnlReturn?: number;
+  barHeight?: number;
+  rowGap?: number;
+  barColumnPadX?: number;
+  overshootPad?: number;
+  barOpacity?: number;
+};
+
 function pct4(n: number): string {
   return `${(n * 100).toFixed(4)}%`;
 }
@@ -44,21 +65,12 @@ function rowGapClass(px: number): string {
   return "gap-y-5";
 }
 
-export type DrawdownChartProps = {
-  realizedDD: number;
-  marginDD: number;
-  levels?: Level[];
-  levelColors?: string[];
-  barHeight?: number;
-  rowGap?: number;
-  barColumnPadX?: number;
-  overshootPad?: number;
-  barOpacity?: number;
-};
-
 export default function DrawdownChart({
   realizedDD,
   marginDD,
+  realizedBreakdown,
+  marginBreakdown,
+  selectedAccounts,
   levels = [
     { value: 0.01, label: "-1%" },
     { value: 0.02, label: "-2%" },
@@ -74,13 +86,10 @@ export default function DrawdownChart({
   overshootPad = 1.06,
   barOpacity = 0.78,
 }: DrawdownChartProps) {
-  const maxLevel = levels.length
-    ? Math.max(...levels.map((l) => l.value))
-    : 0.06;
+  const maxLevel = levels.length ? Math.max(...levels.map((l) => l.value)) : 0.06;
   const maxSeriesAbs = Math.max(Math.abs(realizedDD), Math.abs(marginDD), 1e-9);
   const crossedTop = maxSeriesAbs >= maxLevel - 1e-12;
-  const maxAbs =
-    (crossedTop ? overshootPad : 1) * Math.max(maxSeriesAbs, maxLevel);
+  const maxAbs = (crossedTop ? overshootPad : 1) * Math.max(maxSeriesAbs, maxLevel);
 
   const hot =
     levelColors && levelColors.length === levels.length
@@ -93,10 +102,10 @@ export default function DrawdownChart({
     barColumnPadX <= 8
       ? "px-2"
       : barColumnPadX <= 10
-        ? "px-2.5"
-        : barColumnPadX <= 12
-          ? "px-3"
-          : "px-4";
+      ? "px-2.5"
+      : barColumnPadX <= 12
+      ? "px-3"
+      : "px-4";
 
   const AXIS_H_CLS = "h-3.5";
   const AXIS_MB_CLS = "mb-0.5";
@@ -121,11 +130,7 @@ export default function DrawdownChart({
   };
 
   const valueColorClass = (v: number): string =>
-    v < 0
-      ? "text-red-500"
-      : v > 0
-        ? "text-emerald-500"
-        : "text-muted-foreground";
+    v < 0 ? "text-red-500" : v > 0 ? "text-emerald-500" : "text-muted-foreground";
 
   const TOP_EXT_PX = 12;
 
@@ -140,6 +145,43 @@ export default function DrawdownChart({
   const realizedFill = resolveFill(Math.abs(realizedDD), REALIZED_COLOR);
   const marginFill = resolveFill(Math.abs(marginDD), MARGIN_COLOR);
 
+  const normalizeEntries = (
+    map?: Record<string, number>,
+    selected?: string[]
+  ): Array<{ k: string; v: number }> => {
+    if (!map) return [];
+    const pairs = Object.entries(map).filter(([k]) => k.toLowerCase() !== "total");
+    const keyByLower = new Map<string, string>();
+    for (const [k] of pairs) keyByLower.set(k.toLowerCase(), k);
+
+    const chosen =
+      selected && selected.length
+        ? Array.from(
+            new Set(
+              selected
+                .map((a) => keyByLower.get(String(a).toLowerCase()))
+                .filter(Boolean) as string[]
+            )
+          )
+        : pairs.map(([k]) => k).sort();
+
+    return chosen.map((k) => {
+      const raw = map[k];
+      const v =
+        typeof raw === "number" && Number.isFinite(raw) ? raw : Number(raw ?? 0) || 0;
+      return { k, v };
+    });
+  };
+
+  const realizedEntries = useMemo(
+    () => normalizeEntries(realizedBreakdown, selectedAccounts),
+    [realizedBreakdown, selectedAccounts]
+  );
+  const marginEntries = useMemo(
+    () => normalizeEntries(marginBreakdown, selectedAccounts),
+    [marginBreakdown, selectedAccounts]
+  );
+
   const renderRow = (r: RowSpec) => {
     const absVal = Math.abs(r.value);
     const widthPct = `${(absVal / maxAbs) * 100}%`;
@@ -152,9 +194,7 @@ export default function DrawdownChart({
           style={{ background: METRICS_COLORS.railBg }}
         />
         <div
-          className={["absolute left-0 top-0 rounded-[2px]", BAR_H_CLS].join(
-            " "
-          )}
+          className={["absolute left-0 top-0 rounded-[2px]", BAR_H_CLS].join(" ")}
           style={{
             width: widthPct,
             backgroundColor: fillColor,
@@ -172,14 +212,10 @@ export default function DrawdownChart({
         Drawdown (MTD)
       </div>
 
-      <div
-        className={["grid", GRID_COLS_CLS, COL_GAP_CLS, ROW_GAP_CLS].join(" ")}
-      >
+      <div className={["grid", GRID_COLS_CLS, COL_GAP_CLS, ROW_GAP_CLS].join(" ")}>
         {/* axis labels */}
         <div />
-        <div
-          className={["relative", AXIS_H_CLS, AXIS_MB_CLS, PAD_X_CLS].join(" ")}
-        >
+        <div className={["relative", AXIS_H_CLS, AXIS_MB_CLS, PAD_X_CLS].join(" ")}>
           {ticks.map((t, i) => {
             const color =
               typeof t.i === "number"
@@ -199,27 +235,16 @@ export default function DrawdownChart({
         <div />
 
         {/* Realized row */}
-        <div className="text-sm text-foreground flex items-center">
-          Realized
-        </div>
+        <div className="text-sm text-foreground flex items-center">Realized</div>
         <TooltipProvider delayDuration={100}>
           <Tooltip>
             <TooltipTrigger asChild>
               <div className="relative w-full min-w-0 cursor-default">
-                {renderRow({
-                  label: "Realized",
-                  color: REALIZED_COLOR,
-                  value: realizedDD,
-                })}
+                {renderRow({ label: "Realized", color: REALIZED_COLOR, value: realizedDD })}
                 {/* shared dashed guides overlay */}
                 <div
                   className="pointer-events-none absolute z-[15]"
-                  style={{
-                    left: 0,
-                    right: 0,
-                    top: `-${TOP_EXT_PX}px`,
-                    bottom: 0,
-                  }}
+                  style={{ left: 0, right: 0, top: `-${TOP_EXT_PX}px`, bottom: 0 }}
                   aria-hidden
                 >
                   <div
@@ -251,7 +276,13 @@ export default function DrawdownChart({
             >
               <div className="mb-1 font-semibold">Realized</div>
               <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                <span className="text-muted-foreground">Drawdown</span>
+                {realizedEntries.map(({ k, v }) => (
+                  <React.Fragment key={`real-${k}`}>
+                    <span className="text-muted-foreground">{k}</span>
+                    <span className={valueColorClass(v)}>{pct4(v)}</span>
+                  </React.Fragment>
+                ))}
+                <span className="text-muted-foreground">total</span>
                 <span className="font-medium" style={{ color: realizedFill }}>
                   {pct4(realizedDD)}
                 </span>
@@ -274,15 +305,8 @@ export default function DrawdownChart({
           <Tooltip>
             <TooltipTrigger asChild>
               <div className="relative w-full min-w-0 cursor-default">
-                {renderRow({
-                  label: "Margin",
-                  color: MARGIN_COLOR,
-                  value: marginDD,
-                })}
-                <div
-                  className="pointer-events-none absolute inset-0 z-[15]"
-                  aria-hidden
-                >
+                {renderRow({ label: "Margin", color: MARGIN_COLOR, value: marginDD })}
+                <div className="pointer-events-none absolute inset-0 z-[15]" aria-hidden>
                   <div
                     className="absolute inset-y-0 border-r border-dashed opacity-90"
                     style={{
@@ -312,7 +336,13 @@ export default function DrawdownChart({
             >
               <div className="mb-1 font-semibold">Margin</div>
               <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                <span className="text-muted-foreground">Drawdown</span>
+                {marginEntries.map(({ k, v }) => (
+                  <React.Fragment key={`marg-${k}`}>
+                    <span className="text-muted-foreground">{k}</span>
+                    <span className={valueColorClass(v)}>{pct4(v)}</span>
+                  </React.Fragment>
+                ))}
+                <span className="text-muted-foreground">total</span>
                 <span className="font-medium" style={{ color: marginFill }}>
                   {pct4(marginDD)}
                 </span>

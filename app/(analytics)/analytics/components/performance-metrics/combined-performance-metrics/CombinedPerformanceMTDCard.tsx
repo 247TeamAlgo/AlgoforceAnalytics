@@ -38,26 +38,15 @@ export default function CombinedPerformanceMTDCard({
 
   const { eq: realizedEq } = useMemo(() => {
     const realizedBalance: Record<string, Record<string, number>> | undefined =
-      (bulk.balancePreUpnl as
-        | Record<string, Record<string, number>>
-        | undefined) ??
+      (bulk.balancePreUpnl as Record<string, Record<string, number>> | undefined) ??
       (bulk.balance as Record<string, Record<string, number>> | undefined) ??
-      (bulk.balances?.realized as
-        | Record<string, Record<string, number>>
-        | undefined);
+      (bulk.balances?.realized as Record<string, Record<string, number>> | undefined);
 
     const series =
       realizedBalance ?? ({} as Record<string, Record<string, number>>);
 
     return computeSeriesOverWindow(series, accs, startDay, endDay);
-  }, [
-    bulk.balancePreUpnl,
-    bulk.balance,
-    bulk.balances,
-    accs,
-    startDay,
-    endDay,
-  ]);
+  }, [bulk.balancePreUpnl, bulk.balance, bulk.balances, accs, startDay, endDay]);
 
   const startBal = realizedEq.length ? realizedEq[0]! : 0;
   const latestRealized = realizedEq.length
@@ -69,7 +58,7 @@ export default function CombinedPerformanceMTDCard({
   const totalBal = marginLatest;
   const deltaBal = totalBal - startBal;
 
-  // Metrics — prefer combined* keys, fall back to mtd*
+  // Totals — prefer combined* keys, fallback to mtd*
   const realizedReturn =
     bulk?.combinedLiveMonthlyReturn?.total ??
     bulk?.mtdReturn?.realized?.total ??
@@ -87,6 +76,12 @@ export default function CombinedPerformanceMTDCard({
     bulk?.combinedLiveMonthlyDrawdownWithUpnl?.total ??
     bulk?.mtdDrawdown?.margin?.total ??
     0;
+
+  // Per-account breakdowns (this is what the tooltips need)
+  const realizedReturnMap = bulk?.mtdReturn?.realized ?? undefined;
+  const marginReturnMap = bulk?.mtdReturn?.margin ?? undefined;
+  const realizedDDMap = bulk?.mtdDrawdown?.realized ?? undefined;
+  const marginDDMap = bulk?.mtdDrawdown?.margin ?? undefined;
 
   // uPnL component (margin return already includes it)
   const upnlReturn = marginReturn - realizedReturn;
@@ -136,6 +131,9 @@ export default function CombinedPerformanceMTDCard({
         <DrawdownChart
           realizedDD={realizedDD}
           marginDD={marginDD}
+          realizedBreakdown={realizedDDMap}
+          marginBreakdown={marginDDMap}
+          selectedAccounts={accs}
           barHeight={barHeight}
           rowGap={rowGap}
           barColumnPadX={barColumnPadX}
@@ -143,6 +141,9 @@ export default function CombinedPerformanceMTDCard({
         <ReturnChart
           realizedReturn={realizedReturn}
           marginReturn={marginReturn}
+          realizedBreakdown={realizedReturnMap}
+          marginBreakdown={marginReturnMap}
+          selectedAccounts={accs}
           upnlReturn={upnlReturn}
           containerWidth={wrapW}
           barHeight={barHeight}

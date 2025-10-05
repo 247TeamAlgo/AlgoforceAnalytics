@@ -1,3 +1,4 @@
+// app/(analytics)/analytics/components/PerformanceMetricsClient.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -13,6 +14,9 @@ import NetPnlList from "./performance-metrics/symbol-pnl/NetPnlList";
 import type { BulkMetricsResponse } from "./performance-metrics/combined-performance-metrics/types";
 
 export type PerformanceMetricsPayload = {
+  /** 👇 add this */
+  accounts?: string[];
+
   window?: { startDay?: string; endDay?: string; mode?: string };
   balances?: { realized?: Record<string, Record<string, number>> };
   balance?: Record<string, Record<string, number>>;
@@ -195,22 +199,34 @@ export default function PerformanceMetricClient({
 
     return {
       window: payload?.window,
+      // pass account list so charts can order composition by “selected” or fallback present keys
+      accounts: payload?.accounts ?? accounts,
+
+      // balances used for header badges
       balance: realized,
       balancePreUpnl: payload?.balancePreUpnl,
+
+      // totals (for the large numbers on the right)
       combinedLiveMonthlyReturn:
-        realizedRetTotal == null
-          ? undefined
-          : { total: Number(realizedRetTotal) },
+        realizedRetTotal == null ? undefined : { total: Number(realizedRetTotal) },
       combinedLiveMonthlyDrawdown:
-        realizedDdTotal == null
-          ? undefined
-          : { total: Number(realizedDdTotal) },
+        realizedDdTotal == null ? undefined : { total: Number(realizedDdTotal) },
       combinedLiveMonthlyReturnWithUpnl:
         marginRetTotal == null ? undefined : { total: Number(marginRetTotal) },
       combinedLiveMonthlyDrawdownWithUpnl:
         marginDdTotal == null ? undefined : { total: Number(marginDdTotal) },
+
+      // >>> THIS WAS MISSING — per-account maps the tooltips need <<<
+      mtdReturn: {
+        realized: payload?.mtdReturn?.realized ?? {},
+        margin:   payload?.mtdReturn?.margin   ?? {},
+      },
+      mtdDrawdown: {
+        realized: payload?.mtdDrawdown?.realized ?? {},
+        margin:   payload?.mtdDrawdown?.margin   ?? {},
+      },
     };
-  }, [payload]);
+  }, [payload, accounts]);
 
   // ----- Developer’s Tool Collapse -----
   const [devOpen, setDevOpen] = useState<boolean>(false);
@@ -240,7 +256,11 @@ export default function PerformanceMetricClient({
               selected={accounts}
               combinedUpnl={payload?.uPnl?.combined ?? 0}
             />
-            <NetPnlList rows={symbolRows} />
+            <NetPnlList
+              rows={symbolRows}
+              selectedAccounts={accounts}
+              symbolBreakdownMap={payload?.symbolRealizedPnl?.symbols}
+            />
           </div>
 
           {/* Developer’s Tool (collapsible) */}
