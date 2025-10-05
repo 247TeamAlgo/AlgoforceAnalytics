@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import LiveUpnlStrip from "./performance-metrics/LiveUpnlStrip";
 import type { Bucket } from "./performance-metrics/symbol-pnl/types";
 import ConsecutiveLosingDaysCard, {
@@ -9,12 +10,12 @@ import ConsecutiveLosingDaysCard, {
 } from "./performance-metrics/losing-days/ConsecutiveLosingDaysCard";
 import CombinedPerformanceMTDCard from "./performance-metrics/combined-performance-metrics/CombinedPerformanceMTDCard";
 import NetPnlList from "./performance-metrics/symbol-pnl/NetPnlList";
+import type { BulkMetricsResponse } from "./performance-metrics/combined-performance-metrics/types";
 
 /** Props aligned with your Page wiring */
 export type PerformanceMetricsPayload = {
   window?: { startDay?: string; endDay?: string; mode?: string };
 
-  // Optional fields some backends provide (used by Combined card if present)
   balances?: { realized?: Record<string, Record<string, number>> };
   balance?: Record<string, Record<string, number>>;
   balancePreUpnl?: Record<string, Record<string, number>>;
@@ -121,22 +122,10 @@ export default function PerformanceMetricClient({
   }, [payload]);
 
   /* ---------- Build a “bulk-like” object for Combined card ---------- */
-  type CombinedBulk = {
-    window?: { startDay?: string; endDay?: string; mode?: string };
-    balance?: Record<string, Record<string, number>>; // realized
-    balancePreUpnl?: Record<string, Record<string, number>>;
-    combinedLiveMonthlyReturn?: { total?: number };
-    combinedLiveMonthlyDrawdown?: { total?: number };
-    combinedLiveMonthlyReturnWithUpnl?: { total?: number };
-    combinedLiveMonthlyDrawdownWithUpnl?: { total?: number };
-  };
-
-  const combinedBulk: CombinedBulk = useMemo(() => {
-    // Prefer explicit fields if present; gracefully fall back to older names
+  const combinedBulk: BulkMetricsResponse = useMemo(() => {
     const realized =
       payload?.balances?.realized ?? payload?.balance ?? undefined;
 
-    // Try to map fallback MTD aggregates if “combinedLive*” are not present
     const realizedRetTotal =
       payload?.combinedLiveMonthlyReturn?.total ??
       payload?.mtdReturn?.realized?.total;
@@ -169,6 +158,9 @@ export default function PerformanceMetricClient({
     };
   }, [payload]);
 
+  /* ---------- Developer’s Tool Collapse ---------- */
+  const [devOpen, setDevOpen] = useState<boolean>(false);
+
   return (
     <div className="space-y-4">
       {/* TOP: UpnL strip (full width) */}
@@ -186,37 +178,69 @@ export default function PerformanceMetricClient({
           alignItems: "start",
         }}
       >
-        {/* LEFT: row with two half-width cards, then raw JSON below */}
+        {/* LEFT: row with two half-width cards, then collapsible dev tool */}
         <div className="space-y-4">
           {/* Row: Combined Performance + Symbol Net PnL side-by-side */}
           <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
             <CombinedPerformanceMTDCard
-              // If your card expects a stricter type, keep this cast mild.
-              bulk={combinedBulk as any}
+              bulk={combinedBulk}
               selected={accounts}
               combinedUpnl={payload?.uPnl?.combined ?? 0}
             />
             <NetPnlList rows={symbolRows} />
           </div>
 
-          {/* Raw payload (leeway) */}
-          <div className="rounded-lg border bg-muted/30 p-3 text-sm font-mono overflow-auto">
-            <div className="mb-2 text-xs text-muted-foreground">
-              Accounts: <span className="font-medium">{accountsLabel}</span>
-            </div>
-            <div className="mb-2 text-xs text-muted-foreground">
-              API as_of: <span className="font-medium">{asOf ?? "—"}</span> •
-              Fetched: <span className="font-medium">{fetchedAt ?? "—"}</span>
-            </div>
-            {error ? (
-              <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {error}
+          {/* Developer’s Tool (collapsible) */}
+          <div className="rounded-lg border">
+            <button
+              type="button"
+              onClick={() => setDevOpen((v) => !v)}
+              aria-expanded={devOpen}
+              className="w-full flex items-center justify-between px-3 py-2 sm:px-4"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium">Developer’s Tool</span>
+                <span className="text-xs text-muted-foreground">
+                  {devOpen ? "Hide" : "Show"}
+                </span>
               </div>
-            ) : null}
-            <pre className="mt-2">{pretty}</pre>
-            {loading ? (
-              <div className="mt-2 text-xs text-muted-foreground">fetching…</div>
-            ) : null}
+              <ChevronDown
+                className={`h-4 w-4 text-muted-foreground transition-transform ${
+                  devOpen ? "rotate-0" : "-rotate-90"
+                }`}
+              />
+            </button>
+            <div className="h-px w-full bg-border" />
+            <div
+              className={`transition-[max-height,opacity] duration-200 ease-out overflow-hidden ${
+                devOpen ? "opacity-100 max-h-[1200px]" : "opacity-0 max-h-0"
+              }`}
+            >
+              <div className="p-3 sm:p-4 text-sm font-mono bg-muted/30">
+                <div className="mb-2 text-xs text-muted-foreground">
+                  Accounts: <span className="font-medium">{accountsLabel}</span>
+                </div>
+                <div className="mb-2 text-xs text-muted-foreground">
+                  API as_of:{" "}
+                  <span className="font-medium">{asOf ?? "—"}</span> • Fetched:{" "}
+                  <span className="font-medium">{fetchedAt ?? "—"}</span>
+                </div>
+
+                {error ? (
+                  <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
+                    {error}
+                  </div>
+                ) : null}
+
+                <pre className="mt-2 overflow-auto">{pretty}</pre>
+
+                {loading ? (
+                  <div className="mt-2 text-xs text-muted-foreground">
+                    fetching…
+                  </div>
+                ) : null}
+              </div>
+            </div>
           </div>
         </div>
 
