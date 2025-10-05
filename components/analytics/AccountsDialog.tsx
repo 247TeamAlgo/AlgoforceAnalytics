@@ -17,7 +17,6 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { usePrefs } from "@/components/prefs/PrefsContext";
-import { displayName } from "@/app/(analytics)/_(depracatedonanalytics)/lib/performance_metric_types";
 import { toast } from "sonner";
 import { useEffect, useMemo, useState } from "react";
 
@@ -168,7 +167,7 @@ export function AccountsDialog() {
             <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-2">
               {filtered.map((a) => {
                 const checked = selectedSet.has(a.redisName);
-                const label = displayName({ ...a, display: a.display ?? undefined });
+                const label = a.redisName;
                 const Icon = a.monitored ? ShieldCheck : Server;
                 return (
                   <label

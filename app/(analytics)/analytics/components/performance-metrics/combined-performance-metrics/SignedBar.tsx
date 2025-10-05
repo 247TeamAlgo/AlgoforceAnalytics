@@ -1,4 +1,3 @@
-// app/(analytics)/analytics/components/performance-metrics/combined-performance-metrics/SignedBar.tsx
 "use client";
 
 import clsx from "clsx";
@@ -17,10 +16,10 @@ export interface SignedBarProps {
   minBarPx?: number;
   negColor?: string;
   posColor?: string;
-  /** 1 = full-height fill (no vertical padding). */
   valueThicknessPct?: number;
   className?: string;
   trackClassName?: string;
+  valueOpacity?: number; // NEW
 }
 
 export default function SignedBar({
@@ -33,9 +32,10 @@ export default function SignedBar({
   minBarPx = 2,
   negColor = "#8A5CF6",
   posColor = "#39A0ED",
-  valueThicknessPct = 1, // full height by default
+  valueThicknessPct = 1,
   className,
   trackClassName,
+  valueOpacity = 0.78, // NEW default
 }: SignedBarProps) {
   const scale = Math.max(1e-12, maxAbs);
   const mag = Math.min(Math.abs(value), scale);
@@ -48,11 +48,7 @@ export default function SignedBar({
   const valueH = Math.max(2, Math.round(hPx * valueThicknessPct));
   const gap = Math.max(0, Math.round((hPx - valueH) / 2));
 
-  const trackStyle: CSSProperties = {
-    height: hPx,
-    borderRadius: 2,
-  };
-
+  const trackStyle: CSSProperties = { height: hPx, borderRadius: 2 };
   const widthPct = (f: number): string => `${Math.max(f * 100, minBarPx)}%`;
 
   const underlayStyle: CSSProperties =
@@ -61,7 +57,6 @@ export default function SignedBar({
         ? { left: 0, width: widthPct(gFrac) }
         : { right: 0, width: widthPct(gFrac) }
       : {};
-
   const valueStyle: CSSProperties =
     mode === "one-negative"
       ? anchor === "left"
@@ -91,6 +86,7 @@ export default function SignedBar({
           top: gap,
           backgroundColor: negColor,
           borderRadius: 2,
+          opacity: valueOpacity,
         }}
       />
     </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import LiveUpnlStrip from "./performance-metrics/LiveUpnlStrip";
 import type { Bucket } from "./performance-metrics/symbol-pnl/types";
@@ -38,6 +38,59 @@ export type PerformanceMetricsPayload = {
   losingDays?: Record<string, { consecutive?: number; max?: number }>;
 };
 
+type Props = {
+  accounts: string[];
+  payload: PerformanceMetricsPayload | null;
+  loading: boolean;
+  error: string | null;
+  asOf?: string;
+  fetchedAt?: string;
+};
+
+const InitialLoadSkeleton = () => {
+  const Card = ({ h = 160 }: { h?: number }) => (
+    <div className="rounded-lg border bg-card" style={{ height: `${h}px` }} />
+  );
+
+  const Dev = () => (
+    <div className="rounded-lg border bg-card">
+      <div className="h-9 px-3 sm:px-4 flex items-center justify-between" />
+      <div className="h-px w-full bg-border" />
+      <div className="p-3 sm:p-4">
+        <div className="h-4 w-32 rounded bg-muted" />
+        <div className="mt-2 h-4 w-64 rounded bg-muted" />
+        <div className="mt-3 h-48 rounded border bg-background" />
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-4 animate-pulse" aria-busy="true">
+      <div className="h-10 rounded-lg border bg-card" />
+
+      <div
+        className="grid gap-4"
+        style={{
+          gridTemplateColumns: "minmax(0, 1fr) minmax(220px, 10%)",
+          alignItems: "start",
+        }}
+      >
+        <div className="space-y-4">
+          <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
+            <Card />
+            <Card />
+          </div>
+          <Dev />
+        </div>
+
+        <div className="row-span-2">
+          <div className="rounded-lg border bg-card" style={{ height: 420 }} />
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default function PerformanceMetricClient({
   accounts,
   payload,
@@ -45,20 +98,24 @@ export default function PerformanceMetricClient({
   error,
   asOf,
   fetchedAt,
-}: {
-  accounts: string[];
-  payload: PerformanceMetricsPayload | null;
-  loading: boolean;
-  error: string | null;
-  asOf?: string;
-  fetchedAt?: string;
-}) {
-  /* ---------- UPNL (filtered to selected accounts) ---------- */
+}: Props) {
+  // ----- One-time loading gate (only on first fetch) -----
+  const [hasLoadedOnce, setHasLoadedOnce] = useState<boolean>(
+    Boolean(payload) || Boolean(error)
+  );
+
+  useEffect(() => {
+    if (payload || error) setHasLoadedOnce(true);
+  }, [payload, error]);
+
+  const initialLoading = loading && !hasLoadedOnce;
+
+  // ----- UPNL (filtered to selected accounts) -----
   const { perFiltered, combinedFiltered } = useMemo(() => {
     const src = payload?.uPnl?.perAccount ?? {};
     const filtered: Record<string, number> = {};
     for (const a of accounts ?? []) {
-      const v = src[a];
+      const v = src[a as keyof typeof src];
       if (typeof v === "number" && Number.isFinite(v)) filtered[a] = v;
       else if (v != null) filtered[a] = Number(v) || 0;
     }
@@ -72,7 +129,7 @@ export default function PerformanceMetricClient({
     };
   }, [payload, accounts]);
 
-  /* ---------- Symbol PnL rows ---------- */
+  // ----- Symbol PnL rows -----
   const symbolRows: Bucket[] = useMemo(() => {
     const symMap = payload?.symbolRealizedPnl?.symbols ?? {};
     const out: Bucket[] = [];
@@ -84,12 +141,14 @@ export default function PerformanceMetricClient({
     return out;
   }, [payload]);
 
-  /* ---------- Losing days → Slim shape ---------- */
+  // ----- Losing days → Slim shape -----
   const perAccounts: Record<string, SlimAccountMetrics> = useMemo(() => {
     const src = payload?.losingDays ?? {};
     const out: Record<string, SlimAccountMetrics> = {};
     for (const a of accounts) {
-      const row = src[a];
+      const row = src[a as keyof typeof src] as
+        | { consecutive?: number; max?: number }
+        | undefined;
       const current = Number(row?.consecutive ?? 0);
       const max = Number(row?.max ?? 0);
       out[a] = { streaks: { current, max } };
@@ -116,7 +175,7 @@ export default function PerformanceMetricClient({
     }
   }, [payload]);
 
-  /* ---------- Combined bulk ---------- */
+  // ----- Combined bulk -----
   const combinedBulk: BulkMetricsResponse = useMemo(() => {
     const realized =
       payload?.balances?.realized ?? payload?.balance ?? undefined;
@@ -153,8 +212,11 @@ export default function PerformanceMetricClient({
     };
   }, [payload]);
 
-  /* ---------- Developer’s Tool Collapse ---------- */
+  // ----- Developer’s Tool Collapse -----
   const [devOpen, setDevOpen] = useState<boolean>(false);
+
+  // ----- Render: show loader ONLY on initial fetch -----
+  if (initialLoading) return <InitialLoadSkeleton />;
 
   return (
     <div className="space-y-4">
@@ -214,8 +276,8 @@ export default function PerformanceMetricClient({
                   Accounts: <span className="font-medium">{accountsLabel}</span>
                 </div>
                 <div className="mb-2 text-xs text-muted-foreground">
-                  API as_of:{" "}
-                  <span className="font-medium">{asOf ?? "—"}</span> • Fetched:{" "}
+                  API as_of: <span className="font-medium">{asOf ?? "—"}</span>{" "}
+                  • Fetched:{" "}
                   <span className="font-medium">{fetchedAt ?? "—"}</span>
                 </div>
 
@@ -232,11 +294,7 @@ export default function PerformanceMetricClient({
                   </pre>
                 </div>
 
-                {loading ? (
-                  <div className="mt-2 text-xs text-muted-foreground">
-                    fetching…
-                  </div>
-                ) : null}
+                {/* Intentionally no loading indicator here; we only show it on first render */}
               </div>
             </div>
           </div>

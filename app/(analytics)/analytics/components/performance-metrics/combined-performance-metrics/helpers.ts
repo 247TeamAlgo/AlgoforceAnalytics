@@ -1,3 +1,74 @@
+// Unified palette + small helpers used across metrics cards
+
+export type MetricsColors = {
+  railBg: string;
+  guide: string;
+  realized: string;
+  margin: string;
+  upnl: string;
+  pos: string;
+  neg: string;
+};
+
+export const METRICS_COLORS: MetricsColors = {
+  railBg: "rgba(148,163,184,0.14)", // neutral rail (works in dark/light)
+  guide: "var(--muted-foreground)", // dashed guides / axes
+  realized: "hsl(210 90% 55%)",     // blue
+  margin:  "hsl(28  96% 56%)",      // orange
+  upnl:    "hsl(45  94% 55%)",      // gold
+  pos:     "hsl(152 62% 50%)",      // green (positive PnL)
+  neg:     "hsl(0   84% 62%)",      // red   (negative PnL)
+};
+
+export const REALIZED_COLOR = METRICS_COLORS.realized;
+export const MARGIN_COLOR  = METRICS_COLORS.margin;
+
+/** Diverging heat for drawdown thresholds: amber -> orange -> red. */
+export function makeDrawdownLevelColors(n: number): string[] {
+  if (n <= 0) return [];
+  const out: string[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const t = n === 1 ? 1 : i / (n - 1);
+    const hue = Math.round(35 - 35 * t);   // 35 -> 0
+    const sat = Math.round(96 - 8 * t);    // 96% -> 88%
+    const lig = Math.round(58 - 16 * t);   // 58% -> 42%
+    out.push(`hsl(${hue} ${sat}% ${lig}%)`);
+  }
+  return out;
+}
+
+/** Sum selected accounts into an equity series across [startDay, endDay] (inclusive). */
+export function computeSeriesOverWindow(
+  byDay: Record<string, Record<string, number>>,
+  accounts: string[],
+  startDay: string,
+  endDay: string
+): { eq: number[] } {
+  const days = Object.keys(byDay).sort();
+  const eq: number[] = [];
+
+  for (let i = 0; i < days.length; i += 1) {
+    const d = days[i]!;
+    if (startDay && d < startDay) continue;
+    if (endDay && d > endDay) continue;
+
+    const row = byDay[d] ?? {};
+    let s = 0;
+    if (accounts.length) {
+      for (let j = 0; j < accounts.length; j += 1) {
+        const k = accounts[j]!;
+        s += Number(row[k] ?? 0);
+      }
+    } else {
+      s = Number(row.total ?? 0);
+    }
+    eq.push(s);
+  }
+
+  return { eq };
+}
+
+
 export function toNum(n: unknown, fallback = 0): number {
   if (typeof n === "number") return Number.isFinite(n) ? n : fallback;
   if (typeof n === "string") {
@@ -49,32 +120,3 @@ export function nearestKeyAtOrAfter(
   const i = keys.findIndex((k) => k >= target);
   return i === -1 ? null : keys[i]!;
 }
-
-/* series helpers */
-export function computeSeriesOverWindow(
-  balance: Record<string, Record<string, number>>,
-  accounts: readonly string[],
-  start: string,
-  end: string
-): { keys: string[]; eq: number[] } {
-  const keys = Object.keys(balance || {}).sort();
-  const startKey = nearestKeyAtOrAfter(keys, start);
-  const endKey = nearestKeyAtOrBefore(keys, end);
-  if (!startKey || !endKey) return { keys: [], eq: [] };
-  const i0 = keys.indexOf(startKey);
-  const i1 = keys.indexOf(endKey);
-  const windowKeys = keys.slice(i0, i1 + 1);
-  const eq = windowKeys.map((k) => sumSelectedFromRow(balance[k], accounts));
-  return { keys: windowKeys, eq };
-}
-
-/* colors + chart config */
-export const REALIZED_COLOR = "#39A0ED"; // blue
-export const MARGIN_COLOR = "#8A5CF6"; // purple
-
-export type ChartConfig = Record<string, { label: string; color: string }>;
-
-export const chartCfg: ChartConfig = {
-  pos: { label: "Realized", color: REALIZED_COLOR },
-  neg: { label: "Margin", color: MARGIN_COLOR },
-};

@@ -1,3 +1,4 @@
+// app/(analytics)/analytics/components/performance-metrics/symbol-net/NetPnlList.tsx
 "use client";
 
 import {
@@ -7,13 +8,18 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { TrendingDown, TrendingUp } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { BarChart3, TrendingDown, TrendingUp } from "lucide-react";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Bucket } from "./types";
+import { METRICS_COLORS } from "../combined-performance-metrics/helpers";
 
-/* ---------- colors & formatters ---------- */
-const POS = "#23ba7d";
-const NEG = "#f6465d";
+/* ---------------------------- formatters ---------------------------- */
 
 function usd(n: number): string {
   const v = Number.isFinite(n) ? n : 0;
@@ -24,62 +30,89 @@ function usd(n: number): string {
   })}`;
 }
 
+function pct2(n: number): string {
+  const v = Number.isFinite(n) ? n : 0;
+  return `${v.toFixed(2)}%`;
+}
+
+/* ------------------------------- types ------------------------------- */
+
 type RowDatum = {
   id: string;
   label: string;
-  value: number;
-  /** 0..100 relative to max abs across rows */
-  fillPct: number;
+  value: number; // USD PnL
+  fillFrac: number; // kept for dynamic range softening if needed elsewhere
+  totalPct: number; // signed % of basis
   sign: "pos" | "neg" | "zero";
+  accounts?: Record<string, number>;
 };
 
 type Stats = { sum: number; max: RowDatum | null; min: RowDatum | null };
 
 type Props = {
-  rows: Bucket[]; // [{ label: string; total: number }]
+  rows: Bucket[]; // [{ label, total, accounts? }]
+  /** Basis for Total % (e.g., startBal or live total). Falls back to sum(|PnL|) if absent. */
+  totalBasis?: number;
 };
 
-export default function NetPnlList({ rows }: Props) {
-  /* normalize + relative percentages */
+/* ------------------------------ component ------------------------------ */
+
+export default function NetPnlList({ rows, totalBasis }: Props) {
   const data = useMemo<RowDatum[]>(() => {
     const list = (rows ?? []).slice();
-    const maxAbs =
-      list.reduce((m, r) => Math.max(m, Math.abs(Number(r.total) || 0)), 0) ||
-      1;
+
+    // fallback denominators when no basis is provided
+    let sumAbs = 0;
+    let maxAbs = 0;
+    for (let i = 0; i < list.length; i += 1) {
+      const v = Math.abs(Number(list[i]!.total) || 0);
+      sumAbs += v;
+      if (v > maxAbs) maxAbs = v;
+    }
+    if (sumAbs <= 0) sumAbs = 1;
+    if (maxAbs <= 0) maxAbs = 1;
+
+    const basis =
+      typeof totalBasis === "number" && totalBasis > 0 ? totalBasis : sumAbs;
 
     return list.map((r) => {
       const val = Number(r.total) || 0;
-      const rel = Math.min(100, Math.max(0, (Math.abs(val) / maxAbs) * 100));
+      const sign: RowDatum["sign"] = val > 0 ? "pos" : val < 0 ? "neg" : "zero";
+
+      const totalPct = (val / basis) * 100;
+      // keep sqrt softening available (not used for width anymore, only if needed later)
+      const fillLinear = Math.min(Math.abs(totalPct) / 100, 1);
+      const fillFrac = Math.sqrt(fillLinear);
+
       return {
         id: r.label,
         label: r.label,
         value: val,
-        fillPct: rel,
-        sign: val > 0 ? "pos" : val < 0 ? "neg" : "zero",
+        fillFrac,
+        totalPct,
+        sign,
+        accounts: r.accounts,
       };
     });
-  }, [rows]);
+  }, [rows, totalBasis]);
 
-  /* sort: positives first (by % desc), then negatives/zeros (by % desc) */
   const sorted = useMemo<RowDatum[]>(() => {
     const pos = data
       .filter((d) => d.sign === "pos")
-      .sort((a, b) => b.fillPct - a.fillPct);
+      .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
     const neg = data
       .filter((d) => d.sign === "neg")
-      .sort((a, b) => a.fillPct - b.fillPct); // reverse
+      .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
     const zero = data.filter((d) => d.sign === "zero");
     return [...pos, ...neg, ...zero];
   }, [data]);
 
-  /* header stats */
   const stats = useMemo<Stats>(() => {
     if (!sorted.length) return { sum: 0, max: null, min: null };
     let sum = 0;
     let max = sorted[0]!;
     let min = sorted[0]!;
-    let i = 0;
-    for (i = 0; i < sorted.length; i += 1) {
+    for (let i = 0; i < sorted.length; i += 1) {
       const d = sorted[i]!;
       sum += d.value;
       if (d.value > max.value) max = d;
@@ -88,19 +121,15 @@ export default function NetPnlList({ rows }: Props) {
     return { sum, max, min };
   }, [sorted]);
 
-  /* layout: place the numbers column so its LEFT edge sits right after the
-     *right-most* bar end across rows. Also fix the numbers width to the
-     largest measured row so they align perfectly. */
+  // fixed right column (outside bars)
   const listRef = useRef<HTMLUListElement | null>(null);
-  const [numsLeft, setNumsLeft] = useState<number>(280);
-  const [numsWidth, setNumsWidth] = useState<number>(120);
+  const [numsWidth, setNumsWidth] = useState<number>(132);
 
   useLayoutEffect(() => {
     const root = listRef.current;
     if (!root) return;
 
     const measure = (): void => {
-      // 1) measure the numbers width (max across rows)
       const numNodes =
         root.querySelectorAll<HTMLDivElement>('[data-role="nums"]');
       let maxW = 0;
@@ -108,41 +137,11 @@ export default function NetPnlList({ rows }: Props) {
         const w = n.getBoundingClientRect().width;
         if (w > maxW) maxW = w;
       });
-      const fixedNumsWidth = Math.max(90, Math.min(260, Math.round(maxW)));
-
-      // 2) measure a representative row and its bar track
-      const row = root.querySelector<HTMLLIElement>('[data-role="row"]');
-      const bar = row?.querySelector<HTMLDivElement>('[data-role="bartrack"]');
-      if (!row || !bar) {
-        setNumsWidth(fixedNumsWidth);
-        return;
-      }
-
-      const rowRect = row.getBoundingClientRect();
-      const barRect = bar.getBoundingClientRect();
-      const barOffsetLeft = barRect.left - rowRect.left;
-      const barWidth = barRect.width;
-
-      // 3) find the *right-most* end among rows
-      let maxRightFrac = 0.5;
-      for (let i = 0; i < sorted.length; i += 1) {
-        const d = sorted[i]!;
-        const halfFill = Math.min(50, (d.fillPct * 0.5) / 100);
-        const rightFrac =
-          d.sign === "pos" ? 0.5 + halfFill : d.sign === "neg" ? 0.5 : 0.5;
-        if (rightFrac > maxRightFrac) maxRightFrac = rightFrac;
-      }
-
-      // 4) place the numbers LEFT so they sit just after the farthest bar
-      const GAP_PX = 8;
-      const left = Math.round(barOffsetLeft + barWidth * maxRightFrac + GAP_PX);
-
-      setNumsLeft(left);
-      setNumsWidth(fixedNumsWidth);
+      const fixed = Math.max(110, Math.min(220, Math.round(maxW)));
+      setNumsWidth(fixed);
     };
 
     measure();
-
     const ro = new ResizeObserver(measure);
     ro.observe(root);
     const onResize = (): void => measure();
@@ -154,132 +153,192 @@ export default function NetPnlList({ rows }: Props) {
     };
   }, [sorted]);
 
+  /* ------------------------------- render ------------------------------- */
+
+  const RAIL = METRICS_COLORS.railBg;
+  const FILL_OPACITY = 0.9;
+
+  const Badge = ({
+    swatch,
+    icon,
+    label,
+    value,
+  }: {
+    swatch: string;
+    icon: React.ReactNode;
+    label: string;
+    value: string;
+  }) => (
+    <span className="inline-flex items-center gap-2 rounded-md border bg-card/60 px-2.5 py-1 text-xs">
+      <span
+        className="h-2.5 w-2.5 rounded-[1px]"
+        style={{ backgroundColor: swatch }}
+      />
+      {icon}
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-semibold text-foreground">{value}</span>
+    </span>
+  );
+
   return (
     <Card className="py-0">
       <CardHeader className="border-b !p-0">
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between">
-          <div
-            className="
-              min-w-0 px-6 pt- sm:py-3
-              grid grid-rows-[auto_auto_auto] gap-2
-            "
-          >
+          <div className="min-w-0 px-6 pt-2 sm:py-3 grid grid-rows-[auto_auto_auto] gap-2">
             <CardTitle className="leading-tight">Symbol Net PnL</CardTitle>
-
             <CardDescription className="text-sm leading-snug">
               Realized net per symbol
             </CardDescription>
 
-            {/* header badges */}
-            <div className="flex flex-wrap items-center gap-">
-              {/* Total */}
-              <span className="inline-flex items-center gap-2 border px-2 py-1 text-xs">
-                <span
-                  className="h-2.5 w-2.5"
-                  style={{ backgroundColor: "var(--muted-foreground)" }}
-                />
-                <span className="text-muted-foreground">Total</span>
-                <span className="font-semibold text-foreground">
-                  {usd(stats.sum)}
-                </span>
-              </span>
-
-              {/* Highest */}
-              <span className="inline-flex items-center gap-2 border px-2 py-1 text-xs">
-                <span
-                  className="h-2.5 w-2.5"
-                  style={{ backgroundColor: POS }}
-                />
-                <TrendingUp className="h-3.5 w-3.5" style={{ color: POS }} />
-                <span className="text-muted-foreground">
-                  {`Highest${stats.max ? ` ${stats.max.label}` : ""}`}
-                </span>
-                <span className="font-semibold text-foreground">
-                  {stats.max ? usd(stats.max.value) : "—"}
-                </span>
-              </span>
-
-              {/* Lowest */}
-              <span className="inline-flex items-center gap-2 border px-2 py-1 text-xs">
-                <span
-                  className="h-2.5 w-2.5"
-                  style={{ backgroundColor: NEG }}
-                />
-                <TrendingDown className="h-3.5 w-3.5" style={{ color: NEG }} />
-                <span className="text-muted-foreground">
-                  {`Lowest${stats.min ? ` ${stats.min.label}` : ""}`}
-                </span>
-                <span className="font-semibold text-foreground">
-                  {stats.min ? usd(stats.min.value) : "—"}
-                </span>
-              </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge
+                swatch="var(--muted-foreground)"
+                icon={undefined}
+                label="Total"
+                value={usd(stats.sum)}
+              />
+              <Badge
+                swatch="#22c55e" // emerald-500
+                icon={<TrendingUp className="h-3.5 w-3.5 text-emerald-500" />}
+                label={`Highest${stats.max ? ` ${stats.max.label}` : ""}`}
+                value={stats.max ? usd(stats.max.value) : "—"}
+              />
+              <Badge
+                swatch="#ef4444" // red-500
+                icon={<TrendingDown className="h-3.5 w-3.5 text-red-500" />}
+                label={`Lowest${stats.min ? ` ${stats.min.label}` : ""}`}
+                value={stats.min ? usd(stats.min.value) : "—"}
+              />
             </div>
           </div>
         </div>
       </CardHeader>
 
-      <CardContent className="px-3 sm:px-4 pb-3 sm:pb-4">
-        {sorted.length === 0 ? (
-          <div className="text-sm text-muted-foreground px-4 py-8">
-            No data.
-          </div>
-        ) : (
-          <ul ref={listRef} className="divide-y">
-            {sorted.map((d) => {
-              const isPos = d.sign === "pos";
-              const valueCls =
-                d.sign === "pos"
-                  ? "text-emerald-500"
-                  : d.sign === "neg"
-                    ? "text-red-500"
-                    : "text-muted-foreground";
+      <TooltipProvider delayDuration={100}>
+        <CardContent className="px-3 sm:px-4 pb-3 sm:pb-4">
+          {sorted.length === 0 ? (
+            <div className="text-sm text-muted-foreground px-4 py-8">
+              No data.
+            </div>
+          ) : (
+            <ul ref={listRef} className="divide-y divide-border/60">
+              {sorted.map((d) => {
+                const isPos = d.sign === "pos";
+                const valueCls =
+                  d.sign === "pos"
+                    ? "text-emerald-500"
+                    : d.sign === "neg"
+                      ? "text-red-500"
+                      : "text-muted-foreground";
 
-              const halfFillPct = Math.min(50, (d.fillPct * 0.5) / 100) * 100; // 0..50 in %
-              return (
-                <li
-                  key={d.id}
-                  data-role="row"
-                  className="relative flex items-center gap-3 py-1"
-                  style={{ paddingRight: numsWidth + 12 }}
-                >
-                  {/* Label — right-aligned */}
-                  <div className="w-[10.5ch] min-w-[7ch] truncate text-xs sm:text-sm font-medium text-right">
-                    {d.label}
-                  </div>
+                // HARD CAP at 100% of the whole track. This guarantees no overshoot.
+                const widthPct = Math.min(Math.abs(d.totalPct), 100);
 
-                  {/* Bar track (thicker) */}
-                  <div
-                    data-role="bartrack"
-                    className="relative h-[10px] flex-1 bg-foreground/10"
-                  >
-                    {isPos ? (
-                      <div
-                        className="absolute inset-y-0 left-1/2"
-                        style={{ width: `${halfFillPct}%`, background: POS }}
-                      />
-                    ) : d.sign === "neg" ? (
-                      <div
-                        className="absolute inset-y-0 left-1/2 -translate-x-full"
-                        style={{ width: `${halfFillPct}%`, background: NEG }}
-                      />
-                    ) : null}
-                  </div>
+                const accounts = d.accounts ?? {};
+                const acctEntries = Object.keys(accounts)
+                  .sort()
+                  .map((k) => ({ k, v: Number(accounts[k] || 0) }));
 
-                  {/* Numbers — left-aligned */}
-                  <div
-                    data-role="nums"
-                    className="absolute top-1/2 -translate-y-1/2 flex items-center justify-start gap-2 tabular-nums text-[11px] sm:text-xs text-left"
-                    style={{ left: numsLeft, width: numsWidth }}
-                  >
-                    <span className={valueCls}>{d.fillPct.toFixed(2)}%</span>
-                    <span className={valueCls}>{usd(d.value)}</span>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </CardContent>
+                return (
+                  <Tooltip key={d.id}>
+                    <TooltipTrigger asChild>
+                      <li
+                        data-role="row"
+                        className="relative flex items-center gap-3 py-1.5"
+                        style={{ paddingRight: numsWidth + 12 }}
+                        aria-label={`${d.label} ${usd(d.value)} (${pct2(d.totalPct)})`}
+                      >
+                        {/* Label — right-aligned */}
+                        <div className="w-[10.5ch] min-w-[7ch] truncate text-xs sm:text-sm font-medium text-right">
+                          {d.label}
+                        </div>
+
+                        {/* Bar track (neutral rail) with clipping to enforce 100% max */}
+                        <div
+                          data-role="bartrack"
+                          className="relative h-[20px] flex-1 rounded-[2px] overflow-hidden"
+                          style={{ background: RAIL }}
+                        >
+                          {/* center seam */}
+                          <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px bg-border/50" />
+
+                          {/* Positive leg (right from center) */}
+                          {isPos && (
+                            <div
+                              className={`absolute inset-y-0 left-1/2 bg-emerald-500 rounded-r-[2px]`}
+                              style={{
+                                width: `${widthPct}%`,
+                                opacity: FILL_OPACITY,
+                              }}
+                            />
+                          )}
+
+                          {/* Negative leg (left from center) */}
+                          {d.sign === "neg" && (
+                            <div
+                              className={`absolute inset-y-0 left-1/2 -translate-x-full bg-red-500 rounded-l-[2px]`}
+                              style={{
+                                width: `${widthPct}%`,
+                                opacity: FILL_OPACITY,
+                              }}
+                            />
+                          )}
+                        </div>
+
+                        {/* Numbers — fixed right column (outside bars), tinted green/red */}
+                        <div
+                          data-role="nums"
+                          className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center justify-end gap-2 tabular-nums text-[11px] sm:text-xs text-right"
+                          style={{ width: numsWidth }}
+                        >
+                          <span className={valueCls}>{pct2(d.totalPct)}</span>
+                          <span className={valueCls}>{usd(d.value)}</span>
+                        </div>
+                      </li>
+                    </TooltipTrigger>
+
+                    {/* Tooltip — shadcn surface, values tinted by sign */}
+                    <TooltipContent
+                      align="end"
+                      side="top"
+                      className="p-3 rounded-lg border bg-popover text-popover-foreground shadow-md text-xs"
+                    >
+                      <div className="mb-1 font-semibold">{d.label}</div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                        <span className="text-muted-foreground">Value</span>
+                        <span className={valueCls}>{usd(d.value)}</span>
+
+                        <span className="text-muted-foreground">Total %</span>
+                        <span className={valueCls}>{pct2(d.totalPct)}</span>
+
+                        {acctEntries.map(({ k, v }) => (
+                          <FragmentRow key={k} k={k} v={v} />
+                        ))}
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })}
+            </ul>
+          )}
+        </CardContent>
+      </TooltipProvider>
     </Card>
+  );
+}
+
+/* Split out for functional style & typing */
+function FragmentRow({ k, v }: { k: string; v: number }) {
+  const cls =
+    v > 0
+      ? "text-emerald-500"
+      : v < 0
+        ? "text-red-500"
+        : "text-muted-foreground";
+  return (
+    <>
+      <span className="text-muted-foreground">{k}</span>
+      <span className={cls}>{usd(v)}</span>
+    </>
   );
 }

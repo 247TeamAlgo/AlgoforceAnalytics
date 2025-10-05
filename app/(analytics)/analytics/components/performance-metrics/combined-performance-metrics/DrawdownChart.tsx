@@ -1,12 +1,23 @@
 // app/(analytics)/analytics/components/performance-metrics/combined-performance-metrics/DrawdownChart.tsx
 "use client";
 
-import React from "react";
+import React, { CSSProperties, useMemo } from "react";
+import {
+  REALIZED_COLOR,
+  MARGIN_COLOR,
+  METRICS_COLORS,
+  makeDrawdownLevelColors,
+} from "./helpers";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 type Level = { value: number; label?: string };
-
-const REALIZED_COLOR = "#39A0ED";
-const MARGIN_COLOR = "#8A5CF6";
+type RowSpec = { label: string; color: string; value: number };
+type Tick = { v: number; label: string; i?: number };
 
 function pct4(n: number): string {
   return `${(n * 100).toFixed(4)}%`;
@@ -16,7 +27,22 @@ function clamp01(x: number): number {
   return Math.max(0, Math.min(1, x));
 }
 
-type RowSpec = { label: string; color: string; value: number };
+function hClass(px: number): string {
+  if (px <= 18) return "h-[18px]";
+  if (px <= 20) return "h-5";
+  if (px <= 24) return "h-6";
+  if (px <= 28) return "h-7";
+  if (px <= 32) return "h-8";
+  if (px <= 36) return "h-9";
+  return "h-10";
+}
+function rowGapClass(px: number): string {
+  if (px <= 10) return "gap-y-2.5";
+  if (px <= 12) return "gap-y-3";
+  if (px <= 14) return "gap-y-3.5";
+  if (px <= 16) return "gap-y-4";
+  return "gap-y-5";
+}
 
 export type DrawdownChartProps = {
   realizedDD: number;
@@ -25,6 +51,9 @@ export type DrawdownChartProps = {
   levelColors?: string[];
   barHeight?: number;
   rowGap?: number;
+  barColumnPadX?: number;
+  overshootPad?: number;
+  barOpacity?: number;
 };
 
 export default function DrawdownChart({
@@ -38,158 +67,267 @@ export default function DrawdownChart({
     { value: 0.05, label: "-5%" },
     { value: 0.06, label: "-6%" },
   ],
-  levelColors = [
-    "var(--chart-5)",
-    "#FFA94D",
-    "#FF7043",
-    "var(--chart-1)",
-    "#C62828",
-    "#C62828",
-  ],
+  levelColors,
   barHeight = 20,
   rowGap = 14,
+  barColumnPadX = 10,
+  overshootPad = 1.06,
+  barOpacity = 0.78,
 }: DrawdownChartProps) {
-  // Domain: 0 (left) → maxAbs (right). Values are negative; use abs().
-  const maxLevel = levels.length ? Math.max(...levels.map((l) => l.value)) : 0.06;
-  const maxAbs = Math.max(Math.abs(realizedDD), Math.abs(marginDD), maxLevel, 1e-9);
+  const maxLevel = levels.length
+    ? Math.max(...levels.map((l) => l.value))
+    : 0.06;
+  const maxSeriesAbs = Math.max(Math.abs(realizedDD), Math.abs(marginDD), 1e-9);
+  const crossedTop = maxSeriesAbs >= maxLevel - 1e-12;
+  const maxAbs =
+    (crossedTop ? overshootPad : 1) * Math.max(maxSeriesAbs, maxLevel);
 
-  const rows: RowSpec[] = [
-    { label: "Realized", color: REALIZED_COLOR, value: realizedDD },
-    { label: "Margin", color: MARGIN_COLOR, value: marginDD },
-  ];
+  const hot =
+    levelColors && levelColors.length === levels.length
+      ? levelColors
+      : makeDrawdownLevelColors(levels.length);
 
-  // Layout
-  const GRID_COL_GAP = 10;
-  const AXIS_ROW_H = 14;  // height for the "% labels" row
-  const AXIS_MB = 2;
+  const BAR_H_CLS = hClass(barHeight);
+  const ROW_GAP_CLS = rowGapClass(rowGap);
+  const PAD_X_CLS =
+    barColumnPadX <= 8
+      ? "px-2"
+      : barColumnPadX <= 10
+        ? "px-2.5"
+        : barColumnPadX <= 12
+          ? "px-3"
+          : "px-4";
 
-  // How much to lift the dashed overlay ABOVE each bar (in px).
-  // Realized gets a bigger lift to be closer to the percent labels above.
-  const DASH_UP_OVER_REALIZED = AXIS_ROW_H + AXIS_MB - 3; // ≈ just under the labels row
-  const DASH_UP_OVER_MARGIN = 4; // small lift; change to match realized if you want
+  const AXIS_H_CLS = "h-3.5";
+  const AXIS_MB_CLS = "mb-0.5";
+  const GRID_COLS_CLS = "grid-cols-[auto_1fr_auto]";
+  const COL_GAP_CLS = "gap-x-2.5";
+
+  const ticks: Tick[] = [{ v: 0, label: "0%" }].concat(
+    levels.map((l, i) => ({
+      v: l.value,
+      label: l.label ?? `-${Math.round(l.value * 100)}%`,
+      i,
+    }))
+  );
+
+  const leftPct = (v: number): string => `${clamp01(v / maxAbs) * 100}%`;
+
+  const tickLabelStyle = (v: number): CSSProperties => {
+    const p = clamp01(v / maxAbs) * 100;
+    if (p <= 0.5) return { left: "0%", transform: "translateX(0)" };
+    if (p >= 99.5) return { left: "100%", transform: "translateX(-100%)" };
+    return { left: `${p}%`, transform: "translateX(-50%)" };
+  };
+
+  const valueColorClass = (v: number): string =>
+    v < 0
+      ? "text-red-500"
+      : v > 0
+        ? "text-emerald-500"
+        : "text-muted-foreground";
+
+  const TOP_EXT_PX = 12;
+
+  const resolveFill = (absVal: number, base: string): string => {
+    let c = base;
+    for (let i = 0; i < levels.length; i += 1) {
+      if (absVal >= levels[i]!.value) c = hot[i] ?? c;
+    }
+    return c;
+  };
+
+  const realizedFill = resolveFill(Math.abs(realizedDD), REALIZED_COLOR);
+  const marginFill = resolveFill(Math.abs(marginDD), MARGIN_COLOR);
+
+  const renderRow = (r: RowSpec) => {
+    const absVal = Math.abs(r.value);
+    const widthPct = `${(absVal / maxAbs) * 100}%`;
+    const fillColor = resolveFill(absVal, r.color);
+
+    return (
+      <>
+        <div
+          className={["relative w-full rounded-[2px]", BAR_H_CLS].join(" ")}
+          style={{ background: METRICS_COLORS.railBg }}
+        />
+        <div
+          className={["absolute left-0 top-0 rounded-[2px]", BAR_H_CLS].join(
+            " "
+          )}
+          style={{
+            width: widthPct,
+            backgroundColor: fillColor,
+            opacity: barOpacity,
+          }}
+          aria-label={`${r.label} drawdown bar`}
+        />
+      </>
+    );
+  };
 
   return (
-    <div className="rounded-[2px] border bg-card/40 p-3 mb-5">
+    <div className="rounded-xl border bg-card/40 p-4 sm:p-5">
       <div className="mb-2 text-sm sm:text-base font-medium text-foreground">
         Drawdown (MTD)
       </div>
 
-      {/* Shared 3-col grid keeps everything aligned */}
       <div
-        className="grid"
-        style={{
-          gridTemplateColumns: "auto 1fr auto", // label | bar | value
-          columnGap: GRID_COL_GAP,
-          rowGap,
-        }}
+        className={["grid", GRID_COLS_CLS, COL_GAP_CLS, ROW_GAP_CLS].join(" ")}
       >
-        {/* Top axis labels aligned to the bar column */}
+        {/* axis labels */}
         <div />
-        <div className="relative" style={{ height: AXIS_ROW_H, marginBottom: AXIS_MB }}>
-          {[{ v: 0, label: "0%" }, ...levels.map((l) => ({ v: l.value, label: l.label ?? `-${Math.round(l.value * 100)}%` }))].map(
-            (t, i) => {
-              const leftPct = clamp01(t.v / maxAbs) * 100;
-              const color = i === 0 ? "var(--muted-foreground)" : levelColors[i - 1] ?? "var(--muted-foreground)";
-              return (
-                <span
-                  key={`tick-${t.label}`}
-                  className="absolute text-[11px] leading-none"
-                  style={{
-                    left: `${leftPct}%`,
-                    transform: "translateX(-50%)",
-                    color,
-                    top: 0,
-                  }}
-                >
-                  {t.label}
-                </span>
-              );
-            }
-          )}
+        <div
+          className={["relative", AXIS_H_CLS, AXIS_MB_CLS, PAD_X_CLS].join(" ")}
+        >
+          {ticks.map((t, i) => {
+            const color =
+              typeof t.i === "number"
+                ? (hot[t.i] ?? METRICS_COLORS.guide)
+                : METRICS_COLORS.guide;
+            return (
+              <span
+                key={`tick-${i}-${t.label}`}
+                className="absolute text-[11px] leading-none top-0"
+                style={{ ...tickLabelStyle(t.v), color }}
+              >
+                {t.label}
+              </span>
+            );
+          })}
         </div>
         <div />
 
-        {/* Rows */}
-        {rows.map((r, rowIdx) => {
-          const absVal = Math.abs(r.value);
-          const widthPct = clamp01(absVal / maxAbs) * 100;
-
-          // Lift amount for dashed overlay (to push its top closer to axis labels)
-          const upLift =
-            rowIdx === 0 ? DASH_UP_OVER_REALIZED : DASH_UP_OVER_MARGIN;
-
-          return (
-            <React.Fragment key={r.label}>
-              <div className="text-sm text-foreground flex items-center">
-                {r.label}
-              </div>
-
-              <div className="relative">
-                {/* Track */}
+        {/* Realized row */}
+        <div className="text-sm text-foreground flex items-center">
+          Realized
+        </div>
+        <TooltipProvider delayDuration={100}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="relative w-full min-w-0 cursor-default">
+                {renderRow({
+                  label: "Realized",
+                  color: REALIZED_COLOR,
+                  value: realizedDD,
+                })}
+                {/* shared dashed guides overlay */}
                 <div
-                  className="w-full rounded-[2px] bg-muted"
-                  style={{ height: `${barHeight}px` }}
-                />
-
-                {/* Fill (0 → right) */}
-                <div
-                  className="absolute left-0 top-0 rounded-[2px]"
-                  style={{
-                    height: `${barHeight}px`,
-                    width: `${widthPct}%`,
-                    backgroundColor: r.color,
-                  }}
-                  aria-label={`${r.label} drawdown bar`}
-                />
-
-                {/* Dashed guidelines — ON TOP of the bar, with a negative top to reach upward */}
-                <div
-                  className="pointer-events-none absolute z-20"
+                  className="pointer-events-none absolute z-[15]"
                   style={{
                     left: 0,
                     right: 0,
-                    top: `-${upLift}px`,                               // lift upwards
-                    height: `${barHeight + upLift}px`,                   // extend to bar top + lift
+                    top: `-${TOP_EXT_PX}px`,
+                    bottom: 0,
                   }}
+                  aria-hidden
                 >
-                  {/* 0% vertical dash */}
                   <div
-                    className="absolute inset-y-0 border-r border-dashed"
+                    className="absolute inset-y-0 border-r border-dashed opacity-90"
                     style={{
-                      left: "0%",
-                      borderColor: "var(--muted-foreground)",
-                      opacity: 0.9,
-                      transform: "translateX(-0.5px)",
+                      left: leftPct(0),
+                      borderColor: METRICS_COLORS.guide,
+                      borderRightWidth: 1,
                     }}
-                    aria-hidden
                   />
-                  {/* Colored level dashes */}
-                  {levels.map((l, i) => {
-                    const leftPct = clamp01(l.value / maxAbs) * 100;
-                    const color = levelColors[i] ?? "var(--muted-foreground)";
-                    return (
-                      <div
-                        key={`${r.label}-g-${i}`}
-                        className="absolute inset-y-0 border-r border-dashed"
-                        style={{
-                          left: `${leftPct}%`,
-                          borderColor: color,
-                          opacity: 0.9,
-                          transform: "translateX(-0.5px)",
-                        }}
-                        aria-hidden
-                      />
-                    );
-                  })}
+                  {levels.map((l, i) => (
+                    <div
+                      key={`lvl-top-${i}`}
+                      className="absolute inset-y-0 border-r border-dashed opacity-90"
+                      style={{
+                        left: leftPct(l.value),
+                        borderColor: hot[i] ?? METRICS_COLORS.guide,
+                        borderRightWidth: 1,
+                      }}
+                    />
+                  ))}
                 </div>
               </div>
-
-              <div className="text-sm font-medium tabular-nums text-foreground flex items-center">
-                {pct4(r.value)}
+            </TooltipTrigger>
+            <TooltipContent
+              align="end"
+              side="top"
+              className="p-3 rounded-lg border bg-popover text-popover-foreground shadow-md text-xs"
+            >
+              <div className="mb-1 font-semibold">Realized</div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                <span className="text-muted-foreground">Drawdown</span>
+                <span className="font-medium" style={{ color: realizedFill }}>
+                  {pct4(realizedDD)}
+                </span>
               </div>
-            </React.Fragment>
-          );
-        })}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <div
+          className={[
+            "text-sm font-medium tabular-nums text-foreground flex items-center",
+            valueColorClass(realizedDD),
+          ].join(" ")}
+        >
+          {pct4(realizedDD)}
+        </div>
+
+        {/* Margin row */}
+        <div className="text-sm text-foreground flex items-center">Margin</div>
+        <TooltipProvider delayDuration={100}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="relative w-full min-w-0 cursor-default">
+                {renderRow({
+                  label: "Margin",
+                  color: MARGIN_COLOR,
+                  value: marginDD,
+                })}
+                <div
+                  className="pointer-events-none absolute inset-0 z-[15]"
+                  aria-hidden
+                >
+                  <div
+                    className="absolute inset-y-0 border-r border-dashed opacity-90"
+                    style={{
+                      left: leftPct(0),
+                      borderColor: METRICS_COLORS.guide,
+                      borderRightWidth: 1,
+                    }}
+                  />
+                  {levels.map((l, i) => (
+                    <div
+                      key={`lvl-bot-${i}`}
+                      className="absolute inset-y-0 border-r border-dashed opacity-90"
+                      style={{
+                        left: leftPct(l.value),
+                        borderColor: hot[i] ?? METRICS_COLORS.guide,
+                        borderRightWidth: 1,
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent
+              align="end"
+              side="top"
+              className="p-3 rounded-lg border bg-popover text-popover-foreground shadow-md text-xs"
+            >
+              <div className="mb-1 font-semibold">Margin</div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                <span className="text-muted-foreground">Drawdown</span>
+                <span className="font-medium" style={{ color: marginFill }}>
+                  {pct4(marginDD)}
+                </span>
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <div
+          className={[
+            "text-sm font-medium tabular-nums text-foreground flex items-center",
+            valueColorClass(marginDD),
+          ].join(" ")}
+        >
+          {pct4(marginDD)}
+        </div>
       </div>
     </div>
   );
