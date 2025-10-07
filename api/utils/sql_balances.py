@@ -1,107 +1,113 @@
+# C:\Users\Algoforce\Documents\GitHub\AlgoforceAnalyticsClient\api\index.py
+"""Build day-end balances and compute related metrics."""
+
+
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
 from datetime import date
+from typing import SupportsFloat, cast
 
 import pandas as pd
 from sqlalchemy import text
 
 from api.utils.io import (
-    get_engine,
     BALANCE_SCHEMA,
     BALANCE_TIME_COLUMN,
     BALANCE_VALUE_COLUMN,
+    get_engine,
+    read_account_earnings,
     read_account_trades,
     read_account_txn,
-    read_account_earnings,
     read_upnl,
 )
-from api.utils.metrics import pct_returns, mtd_return, mtd_drawdown
+from api.utils.metrics import mtd_drawdown, mtd_return, pct_returns
+
+__all__ = [
+    "round6",
+    "serialize_balances_6dp",
+    "build_day_end_balances_fixed",
+    "build_margin_last_day",
+    "compute_metrics_from_balances",
+]
 
 
-# ---------- rounding / serialization ----------
-
-def _round6(x: float) -> float:
+def round6(x: float) -> float:
+    """Round a float to 6 decimal places."""
     return float(round(float(x), 6))
 
-def _serialize_balances_6dp(df: pd.DataFrame, accounts: List[str]) -> Dict[str, Dict[str, float]]:
-    """
-    Turn a (date-indexed) balance dataframe into:
+
+def serialize_balances_6dp(df: pd.DataFrame, accounts: list[str]) -> dict[str, dict[str, float]]:
+    """Serialize a date-indexed balance DataFrame to a nested dict.
+
     {
       "YYYY-mm-dd 00:00:00": {"fund2": 123.456789, "fund3": 456.123456, "total": 579.580245},
       ...
     }
-    Total is recomputed from per-account parts (all rounded 6dp).
+    Total is recomputed from per-account parts (all rounded 6 dp).
     """
     if df.empty:
         return {}
-    out: Dict[str, Dict[str, float]] = {}
+    out: dict[str, dict[str, float]] = {}
     accs = [a for a in accounts if a in df.columns]
     for ts, row in df[accs].sort_index().iterrows():
         key = str(ts)
-        per = {a: _round6(row[a]) for a in accs}
-        out[key] = {**per, "total": _round6(sum(per.values()))}
+        per = {a: round6(float(row[a])) for a in accs}
+        out[key] = {**per, "total": round6(sum(per.values()))}
     return out
 
 
-# ---------- helpers to reproduce CLI initial balance ----------
-
-def _nearest_balance_before(account: str, start_ts: pd.Timestamp) -> Tuple[float, pd.Timestamp]:
-    """
-    From balance.{account}_balance, pick the nearest snapshot <= start_ts,
-    else the first row (ascending). Returns (value, snapshot_time).
-    """
+def _nearest_balance_before(account: str, start_ts: pd.Timestamp) -> tuple[float, pd.Timestamp]:
+    """Pick the nearest snapshot <= start_ts; fallback to first row if none."""
     eng = get_engine()
     with eng.connect() as conn:
-        # nearest <= start
         q1 = text(
             f"SELECT `{BALANCE_TIME_COLUMN}` AS ts, `{BALANCE_VALUE_COLUMN}` AS bal "
             f"FROM `{BALANCE_SCHEMA}`.`{account}_balance` "
             f"WHERE `{BALANCE_TIME_COLUMN}` <= :start "
             f"ORDER BY `{BALANCE_TIME_COLUMN}` DESC LIMIT 1"
         )
-        df = pd.read_sql_query(q1, conn, params={"start": f"{start_ts:%Y-%m-%d %H:%M:%S}"})
+        df: pd.DataFrame = pd.read_sql_query(  # pyright: ignore[reportUnknownMemberType]
+            q1,
+            conn,
+            params={"start": f"{start_ts:%Y-%m-%d %H:%M:%S}"},
+            parse_dates=["ts"],
+            chunksize=None,
+        )
         if not df.empty:
-            ts = pd.to_datetime(df.loc[0, "ts"])
-            bal = float(df.loc[0, "bal"])
-            return bal, ts
+            ts_val = cast(pd.Timestamp, df.at[0, "ts"])
+            bal_val = float(cast(SupportsFloat, df.at[0, "bal"]))
+            return bal_val, ts_val
 
-        # fallback: first snapshot
         q2 = text(
             f"SELECT `{BALANCE_TIME_COLUMN}` AS ts, `{BALANCE_VALUE_COLUMN}` AS bal "
             f"FROM `{BALANCE_SCHEMA}`.`{account}_balance` "
             f"ORDER BY `{BALANCE_TIME_COLUMN}` ASC LIMIT 1"
         )
-        df2 = pd.read_sql_query(q2, conn)
+        df2: pd.DataFrame = pd.read_sql_query(  # pyright: ignore[reportUnknownMemberType]
+            q2, conn, parse_dates=["ts"], chunksize=None
+        )
         if df2.empty:
             return 0.0, start_ts
-        ts = pd.to_datetime(df2.loc[0, "ts"])
-        bal = float(df2.loc[0, "bal"])
-        return bal, ts
+        ts2_val = cast(pd.Timestamp, df2.at[0, "ts"])
+        bal2_val = float(cast(SupportsFloat, df2.at[0, "bal"]))
+        return bal2_val, ts2_val
 
 
 def _initial_balance_at_start(account: str, start_ts: pd.Timestamp) -> float:
-    """
-    Exact CLI logic:
-      1) nearest balance snapshot <= start_ts
-      2) ledger between (snapshot_time, start_ts) inclusive on start of range, exclusive at end
-         using trades(net), funding_fee, earnings, transfers
-      3) initial = nearest + sum(pre_start_deltas)
-    """
+    """Reconstruct initial balance at start_ts from snapshot plus pre-start deltas."""
     nearest_val, anchor_ts = _nearest_balance_before(account, start_ts)
 
-    # build pre-start ledger
     start_str = f"{anchor_ts:%Y-%m-%d %H:%M:%S}"
-    end_str   = f"{(start_ts - pd.Timedelta(seconds=1)):%Y-%m-%d %H:%M:%S}"
+    end_str = f"{(start_ts - pd.Timedelta(seconds=1)):%Y-%m-%d %H:%M:%S}"
 
     if anchor_ts >= start_ts:
         return float(nearest_val)
 
     trades = read_account_trades(account, start_str, end_str)
-    txn    = read_account_txn(account, start_str, end_str)
-    earn   = read_account_earnings(account, start_str, end_str)
+    txn = read_account_txn(account, start_str, end_str)
+    earn = read_account_earnings(account, start_str, end_str)
 
-    pieces: List[pd.Series] = []
+    pieces: list[pd.Series] = []
 
     if not trades.empty:
         pieces.append(trades["realizedPnl"])
@@ -118,13 +124,12 @@ def _initial_balance_at_start(account: str, start_ts: pd.Timestamp) -> float:
 
     pre_sum = 0.0
     if pieces:
-        s = pd.concat(pieces).sort_index()
-        pre_sum = float(pd.to_numeric(s, errors="coerce").fillna(0.0).sum())
+        s: pd.Series = pd.concat(pieces).sort_index()
+        ss: pd.Series = pd.to_numeric(s, errors="coerce")  # pyright: ignore[reportUnknownMemberType]
+        pre_sum = float(ss.sum(skipna=True))
 
     return float(nearest_val) + pre_sum
 
-
-# ---------- notebook-exact daily balance builder ----------
 
 def _build_post_start_ledger_daily_end_with_transfers(
     account: str,
@@ -133,19 +138,15 @@ def _build_post_start_ledger_daily_end_with_transfers(
     end_ts_excl: pd.Timestamp,
     initial_value: float,
 ) -> pd.Series:
-    """
-    Include TRADES (realized - commission), FUNDING_FEE, EARNINGS, TRANSFER after start;
-    running_balance = initial_value + cumsum(dollar_val);
-    drop 'transfer' rows after computing running_balance; take LAST per UTC day.
-    """
+    """Build daily end-of-day balances (exclude transfers in daily buckets)."""
     start_str = f"{start_ts:%Y-%m-%d %H:%M:%S}"
-    end_str   = f"{(end_ts_excl - pd.Timedelta(seconds=1)):%Y-%m-%d %H:%M:%S}"
+    end_str = f"{(end_ts_excl - pd.Timedelta(seconds=1)):%Y-%m-%d %H:%M:%S}"
 
     trades = read_account_trades(account, start_str, end_str)
-    txn    = read_account_txn(account, start_str, end_str)
-    earn   = read_account_earnings(account, start_str, end_str)
+    txn = read_account_txn(account, start_str, end_str)
+    earn = read_account_earnings(account, start_str, end_str)
 
-    pieces: List[pd.DataFrame] = []
+    pieces: list[pd.DataFrame] = []
 
     if not trades.empty:
         t = trades[["realizedPnl"]].rename(columns={"realizedPnl": "dollar_val"})
@@ -171,36 +172,34 @@ def _build_post_start_ledger_daily_end_with_transfers(
     if not pieces:
         return pd.Series([], dtype=float, name=account)
 
-    ledger = pd.concat(pieces, axis=0).sort_index()
+    ledger: pd.DataFrame = pd.concat(pieces, axis=0).sort_index()
+    # Ensure DatetimeIndex for downstream resampling (and for Pylance's benefit).
+    ledger.index = pd.to_datetime(ledger.index, utc=False)
+    ledger = ledger.sort_index()
     ledger["running_balance"] = float(initial_value) + ledger["dollar_val"].cumsum()
 
     no_transfer = ledger[ledger["transaction_type"] != "transfer"]
-
-    daily = no_transfer.groupby(no_transfer.index.floor("D"))["running_balance"].last()
+    series: pd.Series = no_transfer["running_balance"]
+    daily: pd.Series = series.resample("D").last()
     daily.index = pd.to_datetime(daily.index)
     return daily.rename(account)
 
 
 def build_day_end_balances_fixed(
-    accounts: List[str],
+    accounts: list[str],
     *,
     start_day: date,
     end_day: date,
-) -> Tuple[pd.DataFrame, Dict[str, float]]:
-    """
-    Returns:
-      - fixed (no uPnL) day-end balances (index=UTC days, columns=accounts) matching CLI/IPyNB end_balance
-      - initial balances mapping (month-open anchor as computed by CLI)
-    """
+) -> tuple[pd.DataFrame, dict[str, float]]:
+    """Build fixed (no uPnL) end-of-day balances and initial map for the MTD window."""
     start_ts = pd.Timestamp(f"{start_day} 00:00:00")
     end_ts_excl = pd.Timestamp(f"{end_day} 00:00:00") + pd.Timedelta(days=1)
     full_idx = pd.date_range(start_day, end_day, freq="D")
 
-    init_map: Dict[str, float] = {}
-    cols: List[pd.Series] = []
+    init_map: dict[str, float] = {}
+    cols: list[pd.Series] = []
 
     for acc in accounts:
-        # exact CLI initial @ start
         init_val = _initial_balance_at_start(acc, start_ts)
         init_map[acc] = init_val
 
@@ -212,60 +211,58 @@ def build_day_end_balances_fixed(
         else:
             s = s.reindex(full_idx)
             s.iloc[0] = s.iloc[0] if pd.notna(s.iloc[0]) else init_val
-            s = s.ffill().fillna(init_val)
+            s = s.ffill()
+            s = s.where(pd.notna(s), other=float(init_val))
         cols.append(s.rename(acc))
 
-    bal = pd.concat(cols, axis=1) if cols else pd.DataFrame(index=full_idx, columns=accounts, dtype=float)
+    bal = (
+        pd.concat(cols, axis=1)
+        if cols
+        else pd.DataFrame(index=full_idx, columns=accounts, dtype=float)
+    )
     return bal, init_map
 
 
 def build_margin_last_day(
     fixed_balances: pd.DataFrame,
-    accounts: List[str],
+    accounts: list[str],
 ) -> pd.DataFrame:
-    """
-    Return a 1-row dataframe (last day only) with uPnL injected per account and a computed 'total'.
-    """
+    """Return a 1-row DataFrame (last day only) with uPnL injected and total recomputed."""
     if fixed_balances.empty:
-        return pd.DataFrame(columns=accounts + ["total"])
+        return pd.DataFrame(columns=[*accounts, "total"])
     last_day = fixed_balances.index[-1]
     upnl = read_upnl(accounts)
-    row = {a: float(fixed_balances.at[last_day, a]) + float(upnl.get(a, 0.0)) for a in accounts}
+    row = {
+        a: float(cast(SupportsFloat, fixed_balances.at[last_day, a])) + float(upnl.get(a, 0.0))
+        for a in accounts
+    }
     row["total"] = sum(row[a] for a in accounts)
     return pd.DataFrame([row], index=[last_day])
 
 
 def compute_metrics_from_balances(
-    fixed_balances: pd.DataFrame,
-    accounts: List[str],
-) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, float], Dict[str, float]]:
-    """
-    Compute MTD Return & Drawdown for both tracks:
-      - fixed (REALIZED): no uPnL
-      - margin (MARGIN):  uPnL injected on the last day only
-    Includes 'total' column/keys, matching CLI.
-    """
+    fixed_balances: pd.DataFrame, accounts: list[str]
+) -> tuple[dict[str, float], dict[str, float], dict[str, float], dict[str, float]]:
+    """Compute MTD Return & Drawdown for both tracks (fixed, margin), including totals."""
     if fixed_balances.empty:
         return {}, {}, {}, {}
 
-    # REALIZED track
     fixed = fixed_balances.copy()
     fixed["total"] = fixed[accounts].sum(axis=1)
 
-    # MARGIN track (uPnL injected on last day)
     margin = fixed.copy()
     last = fixed.index[-1]
     upnl = read_upnl(accounts)
     for a in accounts:
-        margin.at[last, a] = float(margin.at[last, a]) + float(upnl.get(a, 0.0))
+        current = float(cast(SupportsFloat, margin.at[last, a]))
+        margin.at[last, a] = current + float(upnl.get(a, 0.0))
     margin["total"] = margin[accounts].sum(axis=1)
 
-    # Returns & drawdown
     r_fixed = pct_returns(fixed)
     r_margin = pct_returns(margin)
 
-    mret_fixed  = {k: _round6(v) for k, v in mtd_return(fixed).items()}
-    mret_margin = {k: _round6(v) for k, v in mtd_return(margin).items()}
-    mdd_fixed   = {k: _round6(v) for k, v in mtd_drawdown(r_fixed).items()}
-    mdd_margin  = {k: _round6(v) for k, v in mtd_drawdown(r_margin).items()}
+    mret_fixed = {k: round6(v) for k, v in mtd_return(fixed).items()}
+    mret_margin = {k: round6(v) for k, v in mtd_return(margin).items()}
+    mdd_fixed = {k: round6(v) for k, v in mtd_drawdown(r_fixed).items()}
+    mdd_margin = {k: round6(v) for k, v in mtd_drawdown(r_margin).items()}
     return mret_fixed, mdd_fixed, mret_margin, mdd_margin

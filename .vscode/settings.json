@@ -1,5 +1,16 @@
 {
-    "python-envs.defaultEnvManager": "ms-python.python:conda",
-    "python-envs.defaultPackageManager": "ms-python.python:conda",
-    "python-envs.pythonProjects": []
+  "python-envs.defaultEnvManager": "ms-python.python:conda",
+  "python-envs.defaultPackageManager": "ms-python.python:conda",
+  "python-envs.pythonProjects": [],
+
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": { "source.fixAll": "always" },
+
+  "ruff.enable": true,
+
+  "python.analysis.typeCheckingMode": "strict",
+  "python.analysis.autoImportCompletions": true,
+  "python.analysis.indexing": true,
+
+  "[python]": { "editor.defaultFormatter": "charliermarsh.ruff" },
 }

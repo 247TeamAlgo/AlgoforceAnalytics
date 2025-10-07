@@ -41,3 +41,13 @@ yarn-error.log*
 next-env.d.ts
 
 /lib/generated/prisma
+/api/__pycache__
+/api/utils/__pycache__
+/api/utils/calculations/__pycache__
+*.pyc
+
+# Python caches & bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+/api/__pycache__

@@ -1,73 +1,72 @@
-# algoforce-analytics/api/utils/calculations/return_mtd.py
+# C:\Users\Algoforce\Documents\GitHub\AlgoforceAnalyticsClient\api\utils\calculations\return_mtd.py
+"""Utility functions for month-to-date (MTD) realized and margin returns from JSON balances.
+
+Compute MTD returns for specified accounts using baseline balances, unrealized values, and current
+equity. Returns both a 'realized' return and a 'margin' return per account, plus totals.
+Includes an 'as_of' timestamp.
+"""
+
 from __future__ import annotations
 
-from typing import Dict, Any, List, Optional
-import pandas as pd
+from typing import TypedDict
 
-from ..io import (
-    load_day_open_balances, load_accounts,
-    read_account_trades, read_account_transactions, read_account_earnings, read_upnl
-)
-from ..metrics import mtd_return
+from ..config import now_utc_iso
+from ..json_balances import equity_now, get_json_balances, get_json_unrealized
 
-def _truncate4(x: float) -> float:
-    try: x = float(x)
-    except Exception: return 0.0
-    return float(int(x * 10_000) / 10_000.0)
+__all__ = ["compute_return_mtd_from_json"]
 
-def _truncate4_map(d: Dict[str, float]) -> Dict[str, float]:
-    return {k: _truncate4(v) for k, v in d.items()}
 
-def compute_return_mtd(*, override_accounts: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Live MTD return per account and combined (via 'total'), with UPnL injected on the last day (margin view)."""
-    today = pd.Timestamp.today().date()
-    start_day = today.replace(day=1)
+class ReturnMTD(TypedDict):
+    as_of: str
+    realized: dict[str, float]
+    margin: dict[str, float]
 
-    all_accounts = override_accounts if override_accounts is not None else load_accounts(True)
-    # tz-naive month-open for exact baseline match
-    init = load_day_open_balances(all_accounts, start_day, day_start_hour=0)
-    accounts = [a for a in all_accounts if a in init]
 
-    eq_list = []
-    for acc in accounts:
-        df_tr = read_account_trades(acc, f"{start_day} 00:00:00", f"{today} 23:59:59")
-        df_tx = read_account_transactions(acc, f"{start_day} 00:00:00", f"{today} 23:59:59")
-        df_er = read_account_earnings(acc,    f"{start_day} 00:00:00", f"{today} 23:59:59")
+def _round6(x: float) -> float:
+    try:
+        return float(round(float(x), 6))
+    except Exception:
+        return 0.0
 
-        parts = []
-        if not df_tr.empty:
-            p = df_tr[["realizedPnl"]].rename(columns={"realizedPnl":"dollar_val"}); p["transaction_type"]="realizedPnl"; parts.append(p)
-        if not df_tx.empty:
-            ff = df_tx[df_tx["incomeType"]=="FUNDING_FEE"][["income"]].rename(columns={"income":"dollar_val"}); ff["transaction_type"]="funding_fee"; parts.append(ff)
-            tr = df_tx[df_tx["incomeType"]=="TRANSFER"][["income"]].rename(columns={"income":"dollar_val"}); tr["transaction_type"]="transfer"; parts.append(tr)
-        if not df_er.empty:
-            er = df_er[["rewards"]].rename(columns={"rewards":"dollar_val"}); er["transaction_type"]="earnings"; parts.append(er)
 
-        if parts:
-            ledger = pd.concat(parts).sort_index()
-            ledger = ledger[ledger["transaction_type"] != "transfer"]
-            daily = ledger["dollar_val"].groupby(pd.Grouper(freq="D")).sum()
-        else:
-            daily = pd.Series(dtype=float)
+def _safe_frac(numer: float, denom: float) -> float:
+    if denom == 0.0:
+        return 0.0
+    try:
+        return numer / denom - 1.0
+    except Exception:
+        return 0.0
 
-        eq = daily.cumsum() + float(init[acc]) if not daily.empty else pd.Series([float(init[acc])])
-        eq.name = acc
-        eq_list.append(eq)
 
-    if not eq_list:
-        return {"mtdReturn": {}, "accounts": accounts}
+def compute_return_mtd_from_json(*, override_accounts: list[str] | None = None) -> ReturnMTD:
+    """Compute MTD 'realized' and 'margin' returns using JSON baselines + Redis equity-now.
 
-    bal = pd.concat(eq_list, axis=1).sort_index()
-    first_idx = bal.index[0] - pd.Timedelta(days=1)
-    seed = pd.DataFrame({a: float(init[a]) for a in accounts}, index=[first_idx])
-    bal = pd.concat([seed, bal]).sort_index()
-    bal["total"] = bal[accounts].sum(axis=1)
+    realized[acc] = equity_now / json_balance - 1
+    margin[acc]   = equity_now / (json_balance + json_unrealized) - 1
+    Totals are recomputed on sums (not averages).
+    """
+    accounts = [a.lower() for a in (override_accounts or [])]
+    if not accounts:
+        return {"as_of": now_utc_iso(), "realized": {}, "margin": {}}
 
-    upnl = read_upnl(accounts)
-    last = bal.index[-1]
+    bal_map = get_json_balances()
+    unrl_map = get_json_unrealized()
+    now_map = equity_now(accounts)
+
+    realized: dict[str, float] = {}
+    margin: dict[str, float] = {}
     for a in accounts:
-        bal.loc[last, a] = float(bal.loc[last, a]) + float(upnl.get(a, 0.0))
-    bal["total"] = bal[accounts].sum(axis=1)
+        e0 = float(bal_map.get(a, 0.0))
+        u0 = float(unrl_map.get(a, 0.0))
+        enow = float(now_map.get(a, 0.0))
+        realized[a] = _round6(_safe_frac(enow, e0))
+        margin[a] = _round6(_safe_frac(enow, e0 + u0))
 
-    ret = mtd_return(bal)
-    return {"mtdReturn": _truncate4_map(ret), "accounts": accounts}
+    total_e0 = sum(float(bal_map.get(a, 0.0)) for a in accounts)
+    total_u0 = sum(float(unrl_map.get(a, 0.0)) for a in accounts)
+    total_enow = sum(float(now_map.get(a, 0.0)) for a in accounts)
+
+    realized["total"] = _round6(_safe_frac(total_enow, total_e0))
+    margin["total"] = _round6(_safe_frac(total_enow, total_e0 + total_u0))
+
+    return {"as_of": now_utc_iso(), "realized": realized, "margin": margin}

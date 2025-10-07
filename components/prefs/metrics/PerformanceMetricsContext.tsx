@@ -46,7 +46,7 @@ function statusFrom(asOf?: string, fetchedAt?: string): LiveStatus {
   const a = Date.parse(asOf);
   const b = Date.parse(fetchedAt);
   if (!Number.isFinite(a) || !Number.isFinite(b)) return "unknown";
-  const diff = Math.max(0, b - a); // API time lag vs client fetch time
+  const diff = Math.max(0, b - a);
   if (diff <= 3000) return "green";
   if (diff <= 12000) return "yellow";
   return "red";
@@ -55,7 +55,6 @@ function statusFrom(asOf?: string, fetchedAt?: string): LiveStatus {
 const PerformanceMetricsContext = createContext<
   PerformanceMetricsContextValue | undefined
 >(undefined);
-
 const REFRESH_DELAY_MS = 4000;
 
 export function PerformanceMetricsProvider({
@@ -106,7 +105,6 @@ export function PerformanceMetricsProvider({
   }, [accountsKey]);
 
   useEffect(() => {
-    // stop timer if no accounts
     if (!accountsKey) {
       if (pollRef.current) {
         clearTimeout(pollRef.current);
@@ -114,12 +112,9 @@ export function PerformanceMetricsProvider({
       }
       return;
     }
-
-    // if key unchanged and timer exists, do nothing
     if (lastKeyRef.current === accountsKey && pollRef.current != null) return;
     lastKeyRef.current = accountsKey;
 
-    // reset existing timer
     if (pollRef.current) {
       clearTimeout(pollRef.current);
       pollRef.current = null;
