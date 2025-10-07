@@ -1,22 +1,23 @@
 // app/(analytics)/analytics/components/PerformanceMetricsClient.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
-import LiveUpnlStrip from "./performance-metrics/LiveUpnlStrip";
-import type { Bucket } from "./performance-metrics/symbol-pnl/types";
-import ConsecutiveLosingDaysCard, {
-  SlimAccountMetrics,
-  AccountMini,
-} from "./performance-metrics/losing-days/ConsecutiveLosingDaysCard";
+import { useEffect, useMemo, useState } from "react";
+
 import CombinedPerformanceMTDCard from "./performance-metrics/combined-performance-metrics/CombinedPerformanceMTDCard";
-import NetPnlList from "./performance-metrics/symbol-pnl/NetPnlList";
 import type { BulkMetricsResponse } from "./performance-metrics/combined-performance-metrics/types";
+import LiveUpnlStrip from "./performance-metrics/LiveUpnlStrip";
+import NetPnlList from "./performance-metrics/symbol-pnl/NetPnlList";
+import type { Bucket } from "./performance-metrics/symbol-pnl/types";
+
+import LosingDaysCard from "./performance-metrics/losing-days/ConsecutiveLosingDaysCard";
+import type {
+  AccountMini,
+  LosingDaysPayload
+} from "./performance-metrics/losing-days/types";
 
 export type PerformanceMetricsPayload = {
-  /** 👇 add this */
   accounts?: string[];
-
   window?: { startDay?: string; endDay?: string; mode?: string };
   balances?: { realized?: Record<string, Record<string, number>> };
   balance?: Record<string, Record<string, number>>;
@@ -39,7 +40,9 @@ export type PerformanceMetricsPayload = {
     combined?: number;
     perAccount?: Record<string, number>;
   };
-  losingDays?: Record<string, { consecutive?: number; max?: number }>;
+
+  // >>> UPDATED: remove 'max', add daily map <<<
+  losingDays?: LosingDaysPayload;
 };
 
 type Props = {
@@ -103,15 +106,12 @@ export default function PerformanceMetricClient({
   asOf,
   fetchedAt,
 }: Props) {
-  // ----- One-time loading gate (only on first fetch) -----
   const [hasLoadedOnce, setHasLoadedOnce] = useState<boolean>(
     Boolean(payload) || Boolean(error)
   );
-
   useEffect(() => {
     if (payload || error) setHasLoadedOnce(true);
   }, [payload, error]);
-
   const initialLoading = loading && !hasLoadedOnce;
 
   // ----- UPNL (filtered to selected accounts) -----
@@ -144,21 +144,6 @@ export default function PerformanceMetricClient({
     out.sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
     return out;
   }, [payload]);
-
-  // ----- Losing days → Slim shape -----
-  const perAccounts: Record<string, SlimAccountMetrics> = useMemo(() => {
-    const src = payload?.losingDays ?? {};
-    const out: Record<string, SlimAccountMetrics> = {};
-    for (const a of accounts) {
-      const row = src[a as keyof typeof src] as
-        | { consecutive?: number; max?: number }
-        | undefined;
-      const current = Number(row?.consecutive ?? 0);
-      const max = Number(row?.max ?? 0);
-      out[a] = { streaks: { current, max } };
-    }
-    return out;
-  }, [payload, accounts]);
 
   const accountList: AccountMini[] = useMemo(
     () => accounts.map((r) => ({ redisName: r, strategy: null })),
@@ -199,39 +184,34 @@ export default function PerformanceMetricClient({
 
     return {
       window: payload?.window,
-      // pass account list so charts can order composition by “selected” or fallback present keys
       accounts: payload?.accounts ?? accounts,
-
-      // balances used for header badges
       balance: realized,
       balancePreUpnl: payload?.balancePreUpnl,
-
-      // totals (for the large numbers on the right)
       combinedLiveMonthlyReturn:
-        realizedRetTotal == null ? undefined : { total: Number(realizedRetTotal) },
+        realizedRetTotal == null
+          ? undefined
+          : { total: Number(realizedRetTotal) },
       combinedLiveMonthlyDrawdown:
-        realizedDdTotal == null ? undefined : { total: Number(realizedDdTotal) },
+        realizedDdTotal == null
+          ? undefined
+          : { total: Number(realizedDdTotal) },
       combinedLiveMonthlyReturnWithUpnl:
         marginRetTotal == null ? undefined : { total: Number(marginRetTotal) },
       combinedLiveMonthlyDrawdownWithUpnl:
         marginDdTotal == null ? undefined : { total: Number(marginDdTotal) },
-
-      // >>> THIS WAS MISSING — per-account maps the tooltips need <<<
       mtdReturn: {
         realized: payload?.mtdReturn?.realized ?? {},
-        margin:   payload?.mtdReturn?.margin   ?? {},
+        margin: payload?.mtdReturn?.margin ?? {},
       },
       mtdDrawdown: {
         realized: payload?.mtdDrawdown?.realized ?? {},
-        margin:   payload?.mtdDrawdown?.margin   ?? {},
+        margin: payload?.mtdDrawdown?.margin ?? {},
       },
     };
   }, [payload, accounts]);
 
-  // ----- Developer’s Tool Collapse -----
   const [devOpen, setDevOpen] = useState<boolean>(false);
 
-  // ----- Render: show loader ONLY on initial fetch -----
   if (initialLoading) return <InitialLoadSkeleton />;
 
   return (
@@ -307,24 +287,25 @@ export default function PerformanceMetricClient({
                   </div>
                 ) : null}
 
-                {/* Scrollable JSON container */}
                 <div className="mt-2 max-h-[400px] overflow-y-auto rounded border bg-background px-3 py-2">
                   <pre className="text-xs whitespace-pre-wrap break-all">
                     {pretty}
                   </pre>
                 </div>
-
-                {/* Intentionally no loading indicator here; we only show it on first render */}
               </div>
             </div>
           </div>
         </div>
 
+        {/* RIGHT COLUMN */}
         <div className="row-span-2">
-          <ConsecutiveLosingDaysCard
-            perAccounts={perAccounts}
+          <LosingDaysCard
+            // You can pass apiUrl if you fetch losingDays separately server-side; here we pass the payload.
+            losingDays={payload?.losingDays}
             accounts={accountList}
             variant="list"
+            // levels default to [4,6,8,10]; override here if you want
+            // levels={[{ value: 4 }, { value: 6 }, { value: 8 }, { value: 10 }] as ThresholdLevel[]}
           />
         </div>
       </div>

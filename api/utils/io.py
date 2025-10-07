@@ -1,4 +1,3 @@
-# algoforce-analytics/api/utils/io.py
 from __future__ import annotations
 
 import json
@@ -249,3 +248,11 @@ def read_upnl(accounts: List[str]) -> Dict[str, float]:
     if accounts:
         out["total"] = total
     return out
+
+# -------- Compatibility alias for modules that import read_account_transactions --------
+
+def read_account_transactions(account: str, start_dt: str, end_dt: str) -> pd.DataFrame:
+    """
+    Alias for backward compatibility. Prefer read_account_txn.
+    """
+    return read_account_txn(account, start_dt, end_dt)

@@ -19,6 +19,7 @@ from api.utils.calculations.balance import (
 )
 from api.utils.io import read_account_trades, read_upnl
 from api.utils.accounts import get_accounts
+from api.utils.calculations.consecutive_losing_days import compute_consecutive_losses_mtd
 
 load_dotenv(".env.local")
 app = FastAPI(title="Algoforce Metrics API", version="3.1.0")
@@ -33,63 +34,6 @@ def _today() -> date:
 def _mtd_window() -> tuple[date, date]:
     t = _today()
     return t.replace(day=1), t
-
-
-def _trailing_losses_trades_only_PH(
-    accounts: List[str], start_day: date, end_day: date
-) -> Dict[str, Any]:
-    full_idx = pd.date_range(start_day, end_day, freq="D")
-
-    def daily_local_from_trades(df: pd.DataFrame) -> pd.Series:
-        if df.empty:
-            return pd.Series(0.0, index=full_idx)
-        s = df["realizedPnl"].copy()
-        shifted = s.copy()
-        shifted.index = shifted.index - pd.Timedelta(hours=PH_DAY_START_HOUR)
-        return (
-            shifted.groupby(shifted.index.floor("D"))
-            .sum()
-            .reindex(full_idx, fill_value=0.0)
-        )
-
-    per_acc: Dict[str, Any] = {}
-    comb = pd.Series(0.0, index=full_idx, dtype=float)
-
-    for a in accounts:
-        df = read_account_trades(a, f"{start_day} 00:00:00", f"{end_day} 23:59:59")
-        daily = daily_local_from_trades(df)
-        streak = 0
-        for v in reversed(daily.tolist()):
-            if float(v) < 0.0:
-                streak += 1
-            else:
-                break
-        if streak == 0:
-            per_acc[a] = {"consecutive": 0, "days": {}}
-        else:
-            seg = daily.iloc[-streak:]
-            per_acc[a] = {
-                "consecutive": streak,
-                "days": {ts.strftime("%Y-%m-%d"): float(v) for ts, v in seg.items()},
-            }
-        comb = comb.add(daily, fill_value=0.0)
-
-    c_streak = 0
-    for v in reversed(comb.tolist()):
-        if float(v) < 0.0:
-            c_streak += 1
-        else:
-            break
-    if c_streak == 0:
-        combined = {"consecutive": 0, "days": {}}
-    else:
-        seg = comb.iloc[-c_streak:]
-        combined = {
-            "consecutive": c_streak,
-            "days": {ts.strftime("%Y-%m-%d"): float(v) for ts, v in seg.items()},
-        }
-
-    return {"perAccount": per_acc, "combined": combined}
 
 
 @app.get("/api/health")
@@ -142,8 +86,14 @@ def metrics_bulk(
         fixed_balances, accs
     )
 
-    # Losing-days (trades-only, PH 08:00 cut)
-    losing = _trailing_losses_trades_only_PH(accs, start_day, end_day)
+    # Losing-days (trades-only, PH 08:00 cut) — current streak only; ignore today's 0
+    losing_payload = compute_consecutive_losses_mtd(
+        override_accounts=accs,
+        day_start_hour=PH_DAY_START_HOUR,
+        include_zero=False,          # strict negatives only
+        ignore_trailing_zero=True,   # do not let today's 0 break a streak
+        eps=1e-9,
+    )
 
     # Serialize balances (6 dp, total from per-account rounded parts)
     realized_block = _serialize_balances_6dp(fixed_balances, accs)
@@ -202,7 +152,7 @@ def metrics_bulk(
             "realized": {k: _round6(v) for k, v in mret_fixed.items()},
             "margin": {k: _round6(v) for k, v in mret_margin.items()},
         },
-        "losingDays": {**losing["perAccount"], "combined": losing["combined"]},
+        "losingDays": {**losing_payload["perAccount"], "combined": losing_payload["combined"]},
         "symbolRealizedPnl": {
             "symbols": symbols_dict,
             "totalPerAccount": totals_by_account,
