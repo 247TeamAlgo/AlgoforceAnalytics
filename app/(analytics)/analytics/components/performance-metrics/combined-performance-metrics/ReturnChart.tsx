@@ -3,7 +3,7 @@
 
 import React, { useMemo } from "react";
 import SignedBar from "./SignedBar";
-import { REALIZED_COLOR, MARGIN_COLOR, METRICS_COLORS } from "./helpers";
+import { METRICS_COLORS } from "./helpers";
 import {
   Tooltip,
   TooltipContent,
@@ -11,22 +11,15 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-type Row = { label: "Realized" | "Margin"; value: number; color: string };
+type Row = { label: "Realized" | "Margin"; value: number };
 
 type Props = {
   realizedReturn: number;
   marginReturn: number;
-
-  /** Per-account breakdowns for realized and margin return (fractions). */
   realizedBreakdown?: Record<string, number>;
   marginBreakdown?: Record<string, number>;
-
-  /** Selected accounts; order is preserved in tooltip rows. */
   selectedAccounts?: string[];
-
-  /** Optional: width used for responsive sizing. Falls back if omitted. */
   containerWidth?: number;
-
   upnlReturn?: number;
   barHeight?: number;
   rowGap?: number;
@@ -36,6 +29,12 @@ type Props = {
 function pct4(n: number): string {
   return `${(n * 100).toFixed(4)}%`;
 }
+
+/* Fixed colors: positive → green (emerald-500), negative → red (red-500) */
+const POS_COLOR = "hsl(142 72% 45%)";
+const NEG_COLOR = "hsl(0 72% 51%)";
+const barColorFor = (value: number): string =>
+  value >= 0 ? POS_COLOR : NEG_COLOR;
 
 export function ReturnChart({
   realizedReturn,
@@ -49,19 +48,14 @@ export function ReturnChart({
   rowGap,
   barColumnPadX = 10,
 }: Props) {
-  const marginColor =
-    String(MARGIN_COLOR) === String(REALIZED_COLOR)
-      ? "hsl(263 90% 60%)"
-      : String(MARGIN_COLOR);
-
   const UPNL_COLOR = METRICS_COLORS.upnl;
 
   const rows: Row[] = useMemo(
     () => [
-      { label: "Realized", value: realizedReturn, color: String(REALIZED_COLOR) },
-      { label: "Margin", value: marginReturn, color: marginColor },
+      { label: "Realized", value: realizedReturn },
+      { label: "Margin", value: marginReturn },
     ],
-    [realizedReturn, marginReturn, marginColor]
+    [realizedReturn, marginReturn]
   );
 
   const maxAbs = Math.max(
@@ -82,8 +76,7 @@ export function ReturnChart({
       ? containerWidth
       : 640;
 
-  const BAR_H =
-    barHeight ?? Math.round(Math.min(32, Math.max(20, CW * 0.026)));
+  const BAR_H = barHeight ?? Math.round(Math.min(32, Math.max(20, CW * 0.026)));
   const ROW_GAP = rowGap ?? Math.round(BAR_H * 0.55);
   const LABEL_ROW_H = 22;
   const GUIDE_DASH_PX = 1;
@@ -96,14 +89,20 @@ export function ReturnChart({
     `${((v + bound) / (2 * bound)) * 100}%`;
 
   const valueColorClass = (v: number): string =>
-    v > 0 ? "text-emerald-500" : v < 0 ? "text-red-500" : "text-muted-foreground";
+    v > 0
+      ? "text-emerald-500"
+      : v < 0
+        ? "text-red-500"
+        : "text-muted-foreground";
 
   const normalizeEntries = (
     map?: Record<string, number>,
     selected?: string[]
   ): Array<{ k: string; v: number }> => {
     if (!map) return [];
-    const pairs = Object.entries(map).filter(([k]) => k.toLowerCase() !== "total");
+    const pairs = Object.entries(map).filter(
+      ([k]) => k.toLowerCase() !== "total"
+    );
     const keyByLower = new Map<string, string>();
     for (const [k] of pairs) keyByLower.set(k.toLowerCase(), k);
 
@@ -121,7 +120,9 @@ export function ReturnChart({
     return chosen.map((k) => {
       const raw = map[k];
       const v =
-        typeof raw === "number" && Number.isFinite(raw) ? raw : Number(raw ?? 0) || 0;
+        typeof raw === "number" && Number.isFinite(raw)
+          ? raw
+          : Number(raw ?? 0) || 0;
       return { k, v };
     });
   };
@@ -140,6 +141,7 @@ export function ReturnChart({
     const isPos = r.value > 0;
     const isNeg = r.value < 0;
     const mag = Math.abs(r.value);
+    const barColor = barColorFor(r.value);
 
     const isMargin = r.label === "Margin";
     const upPos = isMargin && upnlReturn > 0;
@@ -172,8 +174,8 @@ export function ReturnChart({
               maxAbs={bound}
               height={BAR_H}
               valueThicknessPct={1}
-              negColor={r.color}
-              valueOpacity={0.78}
+              negColor={barColor}
+              valueOpacity={0.9}
               trackClassName="rounded-[2px]"
             />
             {isMargin && upNeg && (
@@ -207,8 +209,8 @@ export function ReturnChart({
               maxAbs={bound}
               height={BAR_H}
               valueThicknessPct={1}
-              negColor={r.color}
-              valueOpacity={0.78}
+              negColor={barColor}
+              valueOpacity={0.9}
               trackClassName="rounded-[2px]"
             />
             {isMargin && upPos && (
@@ -246,8 +248,12 @@ export function ReturnChart({
           className="flex flex-col justify-between"
           style={{ height: STACK_H }}
         >
-          <div className="text-sm text-foreground flex items-center">Realized</div>
-          <div className="text-sm text-foreground flex items-center">Margin</div>
+          <div className="text-sm text-foreground flex items-center">
+            Realized
+          </div>
+          <div className="text-sm text-foreground flex items-center">
+            Margin
+          </div>
         </div>
 
         {/* chart column */}
@@ -280,10 +286,10 @@ export function ReturnChart({
           </div>
 
           {/* bars */}
-          {renderRow(0, rows[0]!)}
-          {renderRow(1, rows[1]!)}
+          {renderRow(0, rows[0] as Row)}
+          {renderRow(1, rows[1] as Row)}
 
-          {/* tooltips overlay (hover zones align with each bar row) */}
+          {/* tooltips overlay */}
           <TooltipProvider delayDuration={100}>
             {/* Realized tooltip */}
             <Tooltip>
@@ -301,16 +307,17 @@ export function ReturnChart({
               >
                 <div className="mb-1 font-semibold">Realized</div>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                  {/* composition */}
                   {realizedEntries.map(({ k, v }) => (
                     <React.Fragment key={`real-${k}`}>
                       <span className="text-muted-foreground">{k}</span>
                       <span className={valueColorClass(v)}>{pct4(v)}</span>
                     </React.Fragment>
                   ))}
-                  {/* total */}
                   <span className="text-muted-foreground">total</span>
-                  <span className="font-medium" style={{ color: rows[0]!.color }}>
+                  <span
+                    className="font-medium"
+                    style={{ color: barColorFor(rows[0]!.value) }}
+                  >
                     {pct4(rows[0]!.value)}
                   </span>
                 </div>
@@ -333,22 +340,26 @@ export function ReturnChart({
               >
                 <div className="mb-1 font-semibold">Margin</div>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                  {/* composition */}
                   {marginEntries.map(({ k, v }) => (
                     <React.Fragment key={`marg-${k}`}>
                       <span className="text-muted-foreground">{k}</span>
                       <span className={valueColorClass(v)}>{pct4(v)}</span>
                     </React.Fragment>
                   ))}
-                  {/* total */}
                   <span className="text-muted-foreground">total</span>
-                  <span className="font-medium" style={{ color: rows[1]!.color }}>
+                  <span
+                    className="font-medium"
+                    style={{ color: barColorFor(rows[1]!.value) }}
+                  >
                     {pct4(rows[1]!.value)}
                   </span>
                   {upnlReturn !== 0 && (
                     <>
                       <span className="text-muted-foreground">upnl</span>
-                      <span className="font-medium" style={{ color: METRICS_COLORS.upnl }}>
+                      <span
+                        className="font-medium"
+                        style={{ color: METRICS_COLORS.upnl }}
+                      >
                         {pct4(upnlReturn)}
                       </span>
                     </>
@@ -360,7 +371,10 @@ export function ReturnChart({
         </div>
 
         {/* values column */}
-        <div className="flex flex-col justify-between" style={{ height: STACK_H }}>
+        <div
+          className="flex flex-col justify-between"
+          style={{ height: STACK_H }}
+        >
           <div
             className={[
               "text-sm font-medium tabular-nums flex items-center",
