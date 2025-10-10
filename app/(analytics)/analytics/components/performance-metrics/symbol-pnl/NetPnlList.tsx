@@ -14,7 +14,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { TrendingDown, TrendingUp } from "lucide-react";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useMemo } from "react";
 import type { Bucket, SymbolBreakdownMap } from "./types";
 import { METRICS_COLORS } from "../combined-performance-metrics/helpers";
 
@@ -40,7 +40,7 @@ type RowDatum = {
   id: string;
   label: string;
   value: number; // USD PnL
-  fillFrac: number; // kept for dynamic range softening if needed elsewhere
+  fillFrac: number; // reserved
   totalPct: number; // signed % of basis
   sign: "pos" | "neg" | "zero";
   accounts?: Record<string, number>;
@@ -49,24 +49,19 @@ type RowDatum = {
 type Stats = { sum: number; max: RowDatum | null; min: RowDatum | null };
 
 type Props = {
-  rows: Bucket[]; // [{ label, total, accounts? }]
-  /** Basis for Total % (e.g., startBal or live total). Falls back to sum(|PnL|) if absent. */
+  rows: Bucket[];
   totalBasis?: number;
-
-  /**
-   * Selected accounts to display in the tooltip composition.
-   * If provided, their order is preserved in the tooltip.
-   */
   selectedAccounts?: string[];
-
-  /**
-   * Raw per-symbol breakdown map (from API).
-   * Used to compute composition when rows[].accounts is not provided.
-   */
   symbolBreakdownMap?: SymbolBreakdownMap;
 };
 
-/* ------------------------------ component ------------------------------ */
+/* --------------------------- sizing constants --------------------------- */
+
+const LABEL_CH = 10.5; // left label width; right value uses the SAME width
+const BAR_MIN_PCT = 3;
+const RAIL_HEIGHT_PX = 20;
+
+/* --------------------------------- ui --------------------------------- */
 
 export default function NetPnlList({
   rows,
@@ -77,16 +72,11 @@ export default function NetPnlList({
   const data = useMemo<RowDatum[]>(() => {
     const list = (rows ?? []).slice();
 
-    // fallback denominators when no basis is provided
     let sumAbs = 0;
-    let maxAbs = 0;
     for (let i = 0; i < list.length; i += 1) {
-      const v = Math.abs(Number(list[i]!.total) || 0);
-      sumAbs += v;
-      if (v > maxAbs) maxAbs = v;
+      sumAbs += Math.abs(Number(list[i]!.total) || 0);
     }
     if (sumAbs <= 0) sumAbs = 1;
-    if (maxAbs <= 0) maxAbs = 1;
 
     const basis =
       typeof totalBasis === "number" && totalBasis > 0 ? totalBasis : sumAbs;
@@ -94,11 +84,8 @@ export default function NetPnlList({
     return list.map((r) => {
       const val = Number(r.total) || 0;
       const sign: RowDatum["sign"] = val > 0 ? "pos" : val < 0 ? "neg" : "zero";
-
       const totalPct = (val / basis) * 100;
-      // keep sqrt softening available (not used for width anymore, only if needed later)
-      const fillLinear = Math.min(Math.abs(totalPct) / 100, 1);
-      const fillFrac = Math.sqrt(fillLinear);
+      const fillFrac = Math.sqrt(Math.min(Math.abs(totalPct) / 100, 1)); // reserved
 
       return {
         id: r.label,
@@ -115,13 +102,11 @@ export default function NetPnlList({
   const sorted = useMemo<RowDatum[]>(() => {
     const pos = data
       .filter((d) => d.sign === "pos")
-      .sort((a, b) => Math.abs(b.value) - Math.abs(a.value)); // winners by impact
-
+      .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
     const neg = data
       .filter((d) => d.sign === "neg")
-      .sort((a, b) => b.value - a.value); // decreasing for negatives: -50, -500, -1000
-
-    const zero = data.filter((d) => d.sign === "zero"); // keep neutral at the end
+      .sort((a, b) => b.value - a.value);
+    const zero = data.filter((d) => d.sign === "zero");
     return [...pos, ...neg, ...zero];
   }, [data]);
 
@@ -139,38 +124,6 @@ export default function NetPnlList({
     return { sum, max, min };
   }, [sorted]);
 
-  // fixed right column (outside bars)
-  const listRef = useRef<HTMLUListElement | null>(null);
-  const [numsWidth, setNumsWidth] = useState<number>(132);
-
-  useLayoutEffect(() => {
-    const root = listRef.current;
-    if (!root) return;
-
-    const measure = (): void => {
-      const numNodes =
-        root.querySelectorAll<HTMLDivElement>('[data-role="nums"]');
-      let maxW = 0;
-      numNodes.forEach((n) => {
-        const w = n.getBoundingClientRect().width;
-        if (w > maxW) maxW = w;
-      });
-      const fixed = Math.max(110, Math.min(220, Math.round(maxW)));
-      setNumsWidth(fixed);
-    };
-
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(root);
-    const onResize = (): void => measure();
-    window.addEventListener("resize", onResize);
-
-    return () => {
-      window.removeEventListener("resize", onResize);
-      ro.disconnect();
-    };
-  }, [sorted]);
-
   /* ------------------------------- helpers ------------------------------- */
 
   const safeNum = (v: unknown): number =>
@@ -179,52 +132,44 @@ export default function NetPnlList({
   type Entry = { k: string; v: number };
 
   function deriveEntriesForRow(d: RowDatum): Entry[] {
-    // 1) Prefer explicit per-row accounts if provided
     if (d.accounts && Object.keys(d.accounts).length > 0) {
       if (selectedAccounts && selectedAccounts.length > 0) {
-        return selectedAccounts.map((a) => ({ k: a, v: safeNum(d.accounts![a]) }));
+        return selectedAccounts.map((a) => ({
+          k: a,
+          v: safeNum(d.accounts![a]),
+        }));
       }
-      // No selection provided → alphabetical, stable
       return Object.keys(d.accounts)
         .sort()
         .map((k) => ({ k, v: safeNum(d.accounts![k]) }));
     }
-
-    // 2) Otherwise, derive from symbolBreakdownMap using selectedAccounts if provided
     const raw = symbolBreakdownMap?.[d.label];
     if (raw) {
       if (selectedAccounts && selectedAccounts.length > 0) {
         return selectedAccounts.map((a) => ({ k: a, v: safeNum(raw[a]) }));
       }
-      // No selection → include all numeric keys except TOTAL/total, alphabetical
       return Object.keys(raw)
         .filter((k) => k.toLowerCase() !== "total")
         .sort()
         .map((k) => ({ k, v: safeNum(raw[k]) }));
     }
-
-    // 3) Nothing to show
     return [];
   }
 
   function compositionBasis(d: RowDatum, entries: Entry[]): number {
     const sumSelected = entries.reduce((s, x) => s + x.v, 0);
     if (sumSelected !== 0) return sumSelected;
-
-    // If sum of selected is 0, try symbol TOTAL from map
     const raw = symbolBreakdownMap?.[d.label];
     if (raw) {
       const totalLike = raw["TOTAL"] ?? raw["total"];
       const maybe = safeNum(totalLike);
       if (maybe !== 0) return maybe;
     }
-
-    // Fall back to the row value, then guard
     if (d.value !== 0) return d.value;
     return 1;
   }
 
-  /* ------------------------------- render ------------------------------- */
+  /* -------------------------------- render -------------------------------- */
 
   const RAIL = METRICS_COLORS.railBg;
   const FILL_OPACITY = 0.9;
@@ -269,13 +214,13 @@ export default function NetPnlList({
                 value={usd(stats.sum)}
               />
               <Badge
-                swatch="#22c55e" // emerald-500
+                swatch="#22c55e"
                 icon={<TrendingUp className="h-3.5 w-3.5 text-emerald-500" />}
                 label={`Highest${stats.max ? ` ${stats.max.label}` : ""}`}
                 value={stats.max ? usd(stats.max.value) : "—"}
               />
               <Badge
-                swatch="#ef4444" // red-500
+                swatch="#ef4444"
                 icon={<TrendingDown className="h-3.5 w-3.5 text-red-500" />}
                 label={`Lowest${stats.min ? ` ${stats.min.label}` : ""}`}
                 value={stats.min ? usd(stats.min.value) : "—"}
@@ -286,13 +231,13 @@ export default function NetPnlList({
       </CardHeader>
 
       <TooltipProvider delayDuration={100}>
-        <CardContent className="px-3 sm:px-4 pb-3 sm:pb-4">
+        <CardContent className="pl-3 sm:pl-4 pr-3 sm:pr-4 pb-3 sm:pb-4">
           {sorted.length === 0 ? (
             <div className="text-sm text-muted-foreground px-4 py-8">
               No data.
             </div>
           ) : (
-            <ul ref={listRef} className="divide-y divide-border/60">
+            <ul className="divide-y divide-border/60">
               {sorted.map((d) => {
                 const isPos = d.sign === "pos";
                 const valueCls =
@@ -302,10 +247,12 @@ export default function NetPnlList({
                       ? "text-red-500"
                       : "text-muted-foreground";
 
-                // HARD CAP at 100% of the whole track. This guarantees no overshoot.
-                const widthPct = Math.min(Math.abs(d.totalPct), 100);
+                // bar width uses original % basis
+                const widthPct = Math.max(
+                  Math.min(Math.abs(d.totalPct), 100),
+                  d.value !== 0 ? BAR_MIN_PCT : 0
+                );
 
-                // Build dynamic composition entries
                 const entries = deriveEntriesForRow(d);
                 const basis = compositionBasis(d, entries);
 
@@ -314,25 +261,28 @@ export default function NetPnlList({
                     <TooltipTrigger asChild>
                       <li
                         data-role="row"
-                        className="relative flex items-center gap-3 py-1.5"
-                        style={{ paddingRight: numsWidth + 12 }}
+                        className="grid items-center gap-3 py-1.5"
+                        // SAME fixed width for left and right columns
+                        style={{
+                          gridTemplateColumns: `${LABEL_CH}ch minmax(0,1fr) ${LABEL_CH}ch`,
+                        }}
                         aria-label={`${d.label} ${usd(d.value)} (${pct2(d.totalPct)})`}
                       >
-                        {/* Label — right-aligned */}
-                        <div className="w-[10.5ch] min-w-[7ch] truncate text-xs sm:text-sm font-medium text-right">
+                        {/* Left label — right-aligned */}
+                        <div className="truncate text-xs sm:text-sm font-medium text-right">
                           {d.label}
                         </div>
 
-                        {/* Bar track (neutral rail) with clipping to enforce 100% max */}
+                        {/* Bar track */}
                         <div
                           data-role="bartrack"
-                          className="relative h-[20px] flex-1 rounded-[2px] overflow-hidden"
-                          style={{ background: RAIL }}
+                          className="relative rounded-[2px] overflow-hidden"
+                          style={{
+                            background: RAIL,
+                            height: `${RAIL_HEIGHT_PX}px`,
+                          }}
                         >
-                          {/* center seam */}
                           <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px bg-border/50" />
-
-                          {/* Positive leg (right from center) */}
                           {isPos && (
                             <div
                               className="absolute inset-y-0 left-1/2 bg-emerald-500 rounded-r-[2px]"
@@ -342,8 +292,6 @@ export default function NetPnlList({
                               }}
                             />
                           )}
-
-                          {/* Negative leg (left from center) */}
                           {d.sign === "neg" && (
                             <div
                               className="absolute inset-y-0 left-1/2 -translate-x-full bg-red-500 rounded-l-[2px]"
@@ -355,19 +303,16 @@ export default function NetPnlList({
                           )}
                         </div>
 
-                        {/* Numbers — fixed right column (outside bars), tinted green/red */}
+                        {/* Right value — SAME column width as left, left-aligned */}
                         <div
                           data-role="nums"
-                          className="absolute top-1/2 right-2 -translate-y-1/2 flex items-center justify-start gap-2 tabular-nums text-[11px] sm:text-xs text-left pl-2"
-                          style={{ width: numsWidth }}
+                          className="tabular-nums text-[11px] sm:text-xs text-left truncate"
                         >
-                          <span className={valueCls}>{pct2(d.totalPct)}</span>
                           <span className={valueCls}>{usd(d.value)}</span>
                         </div>
                       </li>
                     </TooltipTrigger>
 
-                    {/* Tooltip — totals + dynamic composition */}
                     <TooltipContent
                       align="end"
                       side="top"

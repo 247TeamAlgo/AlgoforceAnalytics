@@ -86,10 +86,13 @@ export default function DrawdownChart({
   overshootPad = 1.06,
   barOpacity = 0.78,
 }: DrawdownChartProps) {
-  const maxLevel = levels.length ? Math.max(...levels.map((l) => l.value)) : 0.06;
+  const maxLevel = levels.length
+    ? Math.max(...levels.map((l) => l.value))
+    : 0.06;
   const maxSeriesAbs = Math.max(Math.abs(realizedDD), Math.abs(marginDD), 1e-9);
   const crossedTop = maxSeriesAbs >= maxLevel - 1e-12;
-  const maxAbs = (crossedTop ? overshootPad : 1) * Math.max(maxSeriesAbs, maxLevel);
+  const maxAbs =
+    (crossedTop ? overshootPad : 1) * Math.max(maxSeriesAbs, maxLevel);
 
   const hot =
     levelColors && levelColors.length === levels.length
@@ -102,10 +105,10 @@ export default function DrawdownChart({
     barColumnPadX <= 8
       ? "px-2"
       : barColumnPadX <= 10
-      ? "px-2.5"
-      : barColumnPadX <= 12
-      ? "px-3"
-      : "px-4";
+        ? "px-2.5"
+        : barColumnPadX <= 12
+          ? "px-3"
+          : "px-4";
 
   const AXIS_H_CLS = "h-3.5";
   const AXIS_MB_CLS = "mb-0.5";
@@ -130,7 +133,11 @@ export default function DrawdownChart({
   };
 
   const valueColorClass = (v: number): string =>
-    v < 0 ? "text-red-500" : v > 0 ? "text-emerald-500" : "text-muted-foreground";
+    v < 0
+      ? "text-red-500"
+      : v > 0
+        ? "text-emerald-500"
+        : "text-muted-foreground";
 
   const TOP_EXT_PX = 12;
 
@@ -150,7 +157,9 @@ export default function DrawdownChart({
     selected?: string[]
   ): Array<{ k: string; v: number }> => {
     if (!map) return [];
-    const pairs = Object.entries(map).filter(([k]) => k.toLowerCase() !== "total");
+    const pairs = Object.entries(map).filter(
+      ([k]) => k.toLowerCase() !== "total"
+    );
     const keyByLower = new Map<string, string>();
     for (const [k] of pairs) keyByLower.set(k.toLowerCase(), k);
 
@@ -168,7 +177,9 @@ export default function DrawdownChart({
     return chosen.map((k) => {
       const raw = map[k];
       const v =
-        typeof raw === "number" && Number.isFinite(raw) ? raw : Number(raw ?? 0) || 0;
+        typeof raw === "number" && Number.isFinite(raw)
+          ? raw
+          : Number(raw ?? 0) || 0;
       return { k, v };
     });
   };
@@ -194,7 +205,9 @@ export default function DrawdownChart({
           style={{ background: METRICS_COLORS.railBg }}
         />
         <div
-          className={["absolute left-0 top-0 rounded-[2px]", BAR_H_CLS].join(" ")}
+          className={["absolute left-0 top-0 rounded-[2px]", BAR_H_CLS].join(
+            " "
+          )}
           style={{
             width: widthPct,
             backgroundColor: fillColor,
@@ -212,10 +225,14 @@ export default function DrawdownChart({
         Drawdown (MTD)
       </div>
 
-      <div className={["grid", GRID_COLS_CLS, COL_GAP_CLS, ROW_GAP_CLS].join(" ")}>
+      <div
+        className={["grid", GRID_COLS_CLS, COL_GAP_CLS, ROW_GAP_CLS].join(" ")}
+      >
         {/* axis labels */}
         <div />
-        <div className={["relative", AXIS_H_CLS, AXIS_MB_CLS, PAD_X_CLS].join(" ")}>
+        <div
+          className={["relative", AXIS_H_CLS, AXIS_MB_CLS, PAD_X_CLS].join(" ")}
+        >
           {ticks.map((t, i) => {
             const color =
               typeof t.i === "number"
@@ -235,16 +252,27 @@ export default function DrawdownChart({
         <div />
 
         {/* Realized row */}
-        <div className="text-sm text-foreground flex items-center">Realized</div>
+        <div className="text-sm text-foreground flex items-center">
+          Realized
+        </div>
         <TooltipProvider delayDuration={100}>
           <Tooltip>
             <TooltipTrigger asChild>
               <div className="relative w-full min-w-0 cursor-default">
-                {renderRow({ label: "Realized", color: REALIZED_COLOR, value: realizedDD })}
+                {renderRow({
+                  label: "Realized",
+                  color: REALIZED_COLOR,
+                  value: realizedDD,
+                })}
                 {/* shared dashed guides overlay */}
                 <div
                   className="pointer-events-none absolute z-[15]"
-                  style={{ left: 0, right: 0, top: `-${TOP_EXT_PX}px`, bottom: 0 }}
+                  style={{
+                    left: 0,
+                    right: 0,
+                    top: `-${TOP_EXT_PX}px`,
+                    bottom: 0,
+                  }}
                   aria-hidden
                 >
                   <div
@@ -282,10 +310,10 @@ export default function DrawdownChart({
                     <span className={valueColorClass(v)}>{pct4(v)}</span>
                   </React.Fragment>
                 ))}
-                <span className="text-muted-foreground">total</span>
+                {/* <span className="text-muted-foreground">total</span>
                 <span className="font-medium" style={{ color: realizedFill }}>
                   {pct4(realizedDD)}
-                </span>
+                </span> */}
               </div>
             </TooltipContent>
           </Tooltip>
@@ -305,8 +333,15 @@ export default function DrawdownChart({
           <Tooltip>
             <TooltipTrigger asChild>
               <div className="relative w-full min-w-0 cursor-default">
-                {renderRow({ label: "Margin", color: MARGIN_COLOR, value: marginDD })}
-                <div className="pointer-events-none absolute inset-0 z-[15]" aria-hidden>
+                {renderRow({
+                  label: "Margin",
+                  color: MARGIN_COLOR,
+                  value: marginDD,
+                })}
+                <div
+                  className="pointer-events-none absolute inset-0 z-[15]"
+                  aria-hidden
+                >
                   <div
                     className="absolute inset-y-0 border-r border-dashed opacity-90"
                     style={{
@@ -342,10 +377,10 @@ export default function DrawdownChart({
                     <span className={valueColorClass(v)}>{pct4(v)}</span>
                   </React.Fragment>
                 ))}
-                <span className="text-muted-foreground">total</span>
+                {/* <span className="text-muted-foreground">total</span>
                 <span className="font-medium" style={{ color: marginFill }}>
                   {pct4(marginDD)}
-                </span>
+                </span> */}
               </div>
             </TooltipContent>
           </Tooltip>

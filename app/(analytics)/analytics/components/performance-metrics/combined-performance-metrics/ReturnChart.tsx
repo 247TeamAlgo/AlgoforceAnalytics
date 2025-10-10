@@ -313,13 +313,13 @@ export function ReturnChart({
                       <span className={valueColorClass(v)}>{pct4(v)}</span>
                     </React.Fragment>
                   ))}
-                  <span className="text-muted-foreground">total</span>
+                  {/* <span className="text-muted-foreground">total</span>
                   <span
                     className="font-medium"
                     style={{ color: barColorFor(rows[0]!.value) }}
                   >
                     {pct4(rows[0]!.value)}
-                  </span>
+                  </span> */}
                 </div>
               </TooltipContent>
             </Tooltip>
@@ -346,14 +346,14 @@ export function ReturnChart({
                       <span className={valueColorClass(v)}>{pct4(v)}</span>
                     </React.Fragment>
                   ))}
-                  <span className="text-muted-foreground">total</span>
+                  {/* <span className="text-muted-foreground">total</span>
                   <span
                     className="font-medium"
                     style={{ color: barColorFor(rows[1]!.value) }}
                   >
                     {pct4(rows[1]!.value)}
-                  </span>
-                  {upnlReturn !== 0 && (
+                  </span> */}
+                  {/* {upnlReturn !== 0 && (
                     <>
                       <span className="text-muted-foreground">upnl</span>
                       <span
@@ -363,7 +363,7 @@ export function ReturnChart({
                         {pct4(upnlReturn)}
                       </span>
                     </>
-                  )}
+                  )} */}
                 </div>
               </TooltipContent>
             </Tooltip>
