@@ -1,3 +1,4 @@
+# api/routers/health.py
 """Healthcheck endpoint(s)."""
 
 from __future__ import annotations

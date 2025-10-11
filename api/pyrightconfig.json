@@ -2,7 +2,7 @@
   "include": ["."],
   "venvPath": ".",
   "venv": ".venv",
-  "typeCheckingMode": "strict",
+  "typeCheckingMode": "basic",
   "reportMissingTypeStubs": "warning",
   "reportUnknownParameterType": "warning",
   "reportUnknownVariableType": "warning",

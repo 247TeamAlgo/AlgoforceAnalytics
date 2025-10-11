@@ -1,33 +1,31 @@
-"""Drawdown helpers for return/equity series."""
+# api/metrics/performance_metrics/calculations/drawdown.py
+"""Drawdown helpers."""
 
 from __future__ import annotations
 
 import pandas as pd
+from pandas import DataFrame
 
 
-def drawdown_from_equity(equity: pd.Series) -> pd.Series:
-    """Return drawdown series from equity curve."""
-    if equity.empty:
-        return equity
-    roll_max = equity.cummax()
-    return (equity - roll_max) / roll_max.replace(0, pd.NA)
+def current_drawdown(live_value: float, peak_value: float) -> float:
+    """Current drawdown = (live - peak) / peak."""
+    return (live_value - peak_value) / peak_value if peak_value != 0.0 else 0.0
 
 
-def mdd_from_equity(equity: pd.Series) -> float:
-    """Maximum drawdown as a float (negative number)."""
-    dd = drawdown_from_equity(equity)
-    return float(dd.min()) if not dd.empty else 0.0
-
-
-def mtd_drawdown_from_returns(returns: pd.Series) -> float:
-    """Month-to-date drawdown computed from a returns series."""
-    if returns.empty:
-        return 0.0
-    # Ensure a DatetimeIndex so `.to_period` is available to the type checker.
-    idx = pd.DatetimeIndex(returns.index)
-    month = idx.to_period("M")
-    this_month = returns[month == month[-1]]
-    if this_month.empty:
-        return 0.0
-    equity = (1.0 + this_month).cumprod()
-    return mdd_from_equity(equity)
+def mtd_drawdown_from_returns(r: DataFrame) -> dict[str, float]:
+    """MTD max drawdown computed from returns series (latest month per column)."""
+    if r.empty:
+        return {}
+    idx = pd.DatetimeIndex(r.index)
+    ym = idx.year * 100 + idx.month
+    latest = int(ym.max())
+    month = r.loc[ym == latest]
+    if month.empty:
+        return {}
+    out: dict[str, float] = {}
+    for col in month.columns:
+        eq = (1.0 + month[col]).cumprod()
+        peak = eq.cummax()
+        dd = (eq - peak) / peak
+        out[str(col)] = float(dd.min()) if not dd.empty else 0.0
+    return out

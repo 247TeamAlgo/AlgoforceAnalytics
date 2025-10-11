@@ -8,9 +8,7 @@ redis>=5.0
 python-dotenv>=1.0
 watchfiles>=1.0
 ruff==0.6.9
-mypy==1.11.2         
+mypy==1.11.2
 bandit==1.7.9
 pip-audit==2.8.0
 vulture==2.14
-
-

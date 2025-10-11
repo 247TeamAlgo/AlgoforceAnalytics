@@ -4,9 +4,9 @@ line-length = 100
 extend-exclude = ["**/__pycache__", ".venv", ".mypy_cache", "dist", "build"]
 
 [tool.ruff.lint]
-# Keep strict, but drop line-length (E501).
+# Strict but practical. We silence line-length (E501) by default.
 select = ["E","F","W","I","UP","B","C4","N","C90","D","ANN","RUF"]
-ignore = ["D203","D213","ANN101","ANN102","E501"]
+ignore = ["E501","D203","D213","ANN101","ANN102"]
 fixable = ["ALL"]
 
 [tool.ruff.lint.pydocstyle]

@@ -1,35 +1,39 @@
-"""Tiny file-based baseline store (JSON)."""
+# api/db/baseline.py
+"""File-based baseline store (unrealized.json)."""
 
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Any
+import os
+from functools import lru_cache
+
+from ..core.config import unrealized_candidates
 
 
-def _path(p: str | Path) -> Path:
-    """Normalize a path value to Path."""
-    return p if isinstance(p, Path) else Path(p)
+def _first_existing_path(paths: list[str]) -> str | None:
+    for p in paths:
+        if p and os.path.exists(p):
+            return p
+    return None
 
 
-def read_baseline(path: str | Path) -> dict[str, Any]:
-    """Read baseline JSON file; return {} if the file does not exist or is invalid."""
-    file_path = _path(path)
-    if not file_path.exists():
+@lru_cache(maxsize=1)
+def read_unrealized_json() -> dict[str, float]:
+    """Read unrealized.json into {account: value}, lowercase keys. Env override + fallbacks."""
+    path = _first_existing_path(unrealized_candidates())
+    if not path:
         return {}
     try:
-        with open(file_path) as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
+        with open(path, encoding="utf-8") as f:
+            obj = json.load(f)
+        if not isinstance(obj, dict):
+            return {}
+        out: dict[str, float] = {}
+        for k, v in obj.items():
+            try:
+                out[str(k).lower()] = float(v)
+            except Exception:
+                out[str(k).lower()] = 0.0
+        return out
     except Exception:
         return {}
-
-
-def write_baseline(path: str | Path, data: dict[str, Any]) -> None:
-    """Write baseline JSON file atomically (basic)."""
-    file_path = _path(path)
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = file_path.with_suffix(file_path.suffix + ".tmp")
-    with open(tmp, "w") as f:
-        json.dump(data, f, indent=2, sort_keys=True)
-    tmp.replace(file_path)
