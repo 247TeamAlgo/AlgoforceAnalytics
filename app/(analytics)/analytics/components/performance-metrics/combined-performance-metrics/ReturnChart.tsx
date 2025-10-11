@@ -305,7 +305,7 @@ export function ReturnChart({
                 side="top"
                 className="p-3 rounded-lg border bg-popover text-popover-foreground shadow-md text-xs"
               >
-                <div className="mb-1 font-semibold">Realized</div>
+                <div className="mb-1 font-semibold">Realized Return</div>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1">
                   {realizedEntries.map(({ k, v }) => (
                     <React.Fragment key={`real-${k}`}>
@@ -338,7 +338,7 @@ export function ReturnChart({
                 side="top"
                 className="p-3 rounded-lg border bg-popover text-popover-foreground shadow-md text-xs"
               >
-                <div className="mb-1 font-semibold">Margin</div>
+                <div className="mb-1 font-semibold">Margin Return</div>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1">
                   {marginEntries.map(({ k, v }) => (
                     <React.Fragment key={`marg-${k}`}>

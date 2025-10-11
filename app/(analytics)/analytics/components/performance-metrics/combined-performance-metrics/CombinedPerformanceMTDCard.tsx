@@ -1,14 +1,24 @@
 "use client";
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { useEffect, useMemo, useRef, useState } from "react";
 import DrawdownChart from "./DrawdownChart";
 import { HeaderBadges } from "./HeaderBadges";
 import { ReturnChart } from "./ReturnChart";
 import { BulkMetricsResponse, DateToRow } from "./types";
 import { computeSeriesOverWindow } from "./helpers";
+import { MaxDrawdownChart } from "./MaxDrawdownChart";
 
-function sumSelected(row: Record<string, number> | undefined, accs: string[]): number {
+function sumSelected(
+  row: Record<string, number> | undefined,
+  accs: string[]
+): number {
   if (!row) return 0;
   let s = 0;
   for (const a of accs) {
@@ -18,13 +28,17 @@ function sumSelected(row: Record<string, number> | undefined, accs: string[]): n
   return s;
 }
 
-function pickDateKey(byDate: DateToRow | undefined, preferDay?: string | null): string | null {
+function pickDateKey(
+  byDate: DateToRow | undefined,
+  preferDay?: string | null
+): string | null {
   if (!byDate) return null;
   const keys = Object.keys(byDate);
   if (!keys.length) return null;
 
   if (preferDay) {
-    if (Object.prototype.hasOwnProperty.call(byDate, preferDay)) return preferDay;
+    if (Object.prototype.hasOwnProperty.call(byDate, preferDay))
+      return preferDay;
     const k2 = keys.find((k) => k.startsWith(preferDay)); // match "YYYY-MM-DD 00:00:00"
     if (k2) return k2;
   }
@@ -42,7 +56,7 @@ export default function CombinedPerformanceMTDCard({
   combinedUpnl?: number;
 }) {
   const accs = useMemo<string[]>(
-    () => (selected.length ? selected : bulk.accounts ?? []),
+    () => (selected.length ? selected : (bulk.accounts ?? [])),
     [selected, bulk.accounts]
   );
 
@@ -55,7 +69,8 @@ export default function CombinedPerformanceMTDCard({
 
   // Charts (realized series already pivoted to account->day)
   const { eq: realizedEq } = useMemo(() => {
-    const realizedSeries: Record<string, Record<string, number>> | undefined = bulk.balance ?? bulk.balancePreUpnl;
+    const realizedSeries: Record<string, Record<string, number>> | undefined =
+      bulk.balance ?? bulk.balancePreUpnl;
     const series = realizedSeries ?? {};
     return computeSeriesOverWindow(series, accs, startDay, endDay);
   }, [bulk.balance, bulk.balancePreUpnl, accs, startDay, endDay]);
@@ -82,22 +97,38 @@ export default function CombinedPerformanceMTDCard({
       }
     }
     // Fallback only if SQL margin is missing
-    const latestRealized = realizedEq.length ? realizedEq[realizedEq.length - 1] : 0;
+    const latestRealized = realizedEq.length
+      ? realizedEq[realizedEq.length - 1]
+      : 0;
     return latestRealized + (Number.isFinite(combinedUpnl) ? combinedUpnl : 0);
-  }, [bulk.sql_historical_balances?.margin, endDay, accs, realizedEq, combinedUpnl]);
+  }, [
+    bulk.sql_historical_balances?.margin,
+    endDay,
+    accs,
+    realizedEq,
+    combinedUpnl,
+  ]);
 
   const deltaBal = totalBal - startBal;
 
   // Totals (unchanged)
   const realizedReturn =
-    bulk?.combinedLiveMonthlyReturn?.total ?? bulk?.mtdReturn?.realized?.total ?? 0;
+    bulk?.combinedLiveMonthlyReturn?.total ??
+    bulk?.mtdReturn?.realized?.total ??
+    0;
   const realizedDD =
-    bulk?.combinedLiveMonthlyDrawdown?.total ?? bulk?.mtdDrawdown?.realized?.total ?? 0;
+    bulk?.combinedLiveMonthlyDrawdown?.total ??
+    bulk?.mtdDrawdown?.realized?.total ??
+    0;
 
   const marginReturn =
-    bulk?.combinedLiveMonthlyReturnWithUpnl?.total ?? bulk?.mtdReturn?.margin?.total ?? 0;
+    bulk?.combinedLiveMonthlyReturnWithUpnl?.total ??
+    bulk?.mtdReturn?.margin?.total ??
+    0;
   const marginDD =
-    bulk?.combinedLiveMonthlyDrawdownWithUpnl?.total ?? bulk?.mtdDrawdown?.margin?.total ?? 0;
+    bulk?.combinedLiveMonthlyDrawdownWithUpnl?.total ??
+    bulk?.mtdDrawdown?.margin?.total ??
+    0;
 
   const realizedReturnMap = bulk?.mtdReturn?.realized ?? undefined;
   const marginReturnMap = bulk?.mtdReturn?.margin ?? undefined;
@@ -129,11 +160,19 @@ export default function CombinedPerformanceMTDCard({
       <CardHeader className="border-b !p-0">
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 px-6 pt-2 sm:py-3 grid grid-rows-[auto_auto_auto] gap-2">
-            <CardTitle className="leading-tight">Combined Performance — MTD</CardTitle>
-            <CardDescription className="text-sm leading-snug">{windowLabel}</CardDescription>
+            <CardTitle className="leading-tight">
+              Combined Performance — MTD
+            </CardTitle>
+            <CardDescription className="text-sm leading-snug">
+              {windowLabel}
+            </CardDescription>
 
             <div className="flex flex-wrap items-center gap-2">
-              <HeaderBadges totalBal={totalBal} startBal={startBal} deltaBal={deltaBal} />
+              <HeaderBadges
+                totalBal={totalBal}
+                startBal={startBal}
+                deltaBal={deltaBal}
+              />
             </div>
           </div>
         </div>
@@ -151,6 +190,18 @@ export default function CombinedPerformanceMTDCard({
           barColumnPadX={barColumnPadX}
         />
         <ReturnChart
+          realizedReturn={realizedReturn}
+          marginReturn={marginReturn}
+          realizedBreakdown={realizedReturnMap}
+          marginBreakdown={marginReturnMap}
+          selectedAccounts={accs}
+          upnlReturn={upnlReturn}
+          containerWidth={wrapW}
+          barHeight={barHeight}
+          rowGap={rowGap}
+          barColumnPadX={barColumnPadX}
+        />
+        <MaxDrawdownChart
           realizedReturn={realizedReturn}
           marginReturn={marginReturn}
           realizedBreakdown={realizedReturnMap}

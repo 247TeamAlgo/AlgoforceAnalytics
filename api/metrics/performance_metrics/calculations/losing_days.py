@@ -1,8 +1,11 @@
 # api/metrics/performance_metrics/calculations/losing_days.py
-"""Compute live month-to-date losing streaks (trades-only, exclude today).
+"""Compute live month-to-date losing streaks (trades-only, using 08:00 local cut).
 
 Rules:
-- Daily PnL by PH cut (08:00).
+- Daily PnL by local cut (day_start_hour, e.g., 08:00).
+- A "day" is counted only after the *next* 08:00 cut passes (i.e., the 24h window is complete).
+  Example: At 2025-10-12 01:33, the day labeled 2025-10-11 is NOT closed yet
+  (it closes at 2025-10-12 08:00), so it must be excluded.
 - Strict negatives only (< 0) count as losing. Zeros are neutral.
 - Skip trailing zeros when counting.
 - Combined streak is computed from the sum of per-day PnL across all accounts.
@@ -77,22 +80,54 @@ def _series_to_day_map(s: pd.Series) -> dict[str, float]:
     return dict(zip(keys, vals, strict=False))
 
 
+def _last_complete_label(now: pd.Timestamp, day_start_hour: int) -> pd.Timestamp | None:
+    """Return the last fully-closed 'shifted-day' label under the given cut.
+
+    With an 08:00 cut:
+      - If now >= today@08:00, the last complete label is (today - 1).
+      - If now <  today@08:00, the last complete label is (today - 2).
+
+    Returns None if there is no complete label within the current month start window.
+    """
+    today = now.normalize()
+    today_cut = today + pd.Timedelta(hours=day_start_hour)
+
+    if now >= today_cut:
+        return today - pd.Timedelta(days=1)
+    else:
+        return today - pd.Timedelta(days=2)
+
+
 def losing_days_mtd(accounts: list[str], day_start_hour: int) -> dict[str, object]:
-    """Compute per-account and combined losing streaks for MTD (excluding today)."""
-    today = pd.Timestamp.today().normalize()
-    start = today.replace(day=1)
-    yesterday = today - pd.Timedelta(days=1)
+    """Compute per-account and combined losing streaks for MTD, using complete 08:00-cut days only."""
+    now = pd.Timestamp.now()  # naive local; aligns with DB local usage
+    today = now.normalize()
+    month_start = today.replace(day=1)
+
+    # Determine the latest *complete* shifted-day label we’re allowed to include.
+    last_complete = _last_complete_label(now, day_start_hour)
+    if last_complete is None or last_complete < month_start:
+        # Nothing complete yet this month (e.g., early morning on the 1st/2nd before the cut).
+        return {"perAccount": {}, "combined": {"consecutive": 0, "days": {}}}
+
+    # Build the index we will allow (month_start .. last_complete).
+    idx_end = last_complete
+    full_idx = pd.date_range(month_start, idx_end, freq="D")
 
     # Combined series (sum of daily PnL across accounts)
-    combined_daily = pd.Series(
-        0.0, index=pd.date_range(start, yesterday, freq="D"), dtype="float64"
-    )
+    combined_daily = pd.Series(0.0, index=full_idx, dtype="float64")
 
     per: dict[str, dict[str, object]] = {}
 
     for a in accounts:
-        df = read_trades(a, f"{start.date()} 00:00:00", f"{yesterday.date()} 23:59:59")
-        daily = _daily_trades_net(df, start, yesterday, day_start_hour)
+        # Read trades up to 'now' so resampling has the data it needs,
+        # but _daily_trades_net will reindex to full_idx (capping at last_complete).
+        df = read_trades(
+            a,
+            f"{month_start.date()} 00:00:00",
+            now.strftime("%Y-%m-%d %H:%M:%S"),
+        )
+        daily = _daily_trades_net(df, month_start, idx_end, day_start_hour)
         streak, tail = _streak_from_series(daily, eps=1e-9)
 
         per[a] = {

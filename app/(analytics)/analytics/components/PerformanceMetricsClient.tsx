@@ -15,8 +15,12 @@ import type { Bucket } from "./performance-metrics/symbol-pnl/types";
 
 import LosingDaysCard from "./performance-metrics/losing-days/ConsecutiveLosingDaysCard";
 import type { AccountMini } from "./performance-metrics/losing-days/types";
-import { EquitySeries, PerformanceMetricsPayload } from "@/components/prefs/types";
-
+import {
+  EquitySeries,
+  PerformanceMetricsPayload,
+} from "@/components/prefs/types";
+import RegularReturnsCard from "./performance-metrics/regular-returns/RegularReturnsCard";
+import RegularReturnsBarGraph from "./performance-metrics/regular-returns/RegularReturnsCard2";
 
 type Props = {
   accounts: string[];
@@ -260,6 +264,11 @@ export default function PerformanceMetricClient({
             />
           </div>
 
+          {/* Max Drawdown */}
+          <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
+            <RegularReturnsBarGraph />
+          </div>
+
           {/* Developer’s Tool */}
           <div className="rounded-lg border bg-card text-card-foreground">
             <button
@@ -315,12 +324,13 @@ export default function PerformanceMetricClient({
         </div>
 
         {/* RIGHT COLUMN */}
-        <div className="row-span-2">
+        <div className="row-span-2 grid gap-4">
           <LosingDaysCard
             losingDays={payload?.losingDays}
             accounts={accountList}
             variant="list"
           />
+          <RegularReturnsCard />
         </div>
       </div>
     </div>
