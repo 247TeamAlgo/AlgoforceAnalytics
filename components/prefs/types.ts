@@ -1,8 +1,9 @@
+// app/types.ts
 /* Shared types */
 
 import { Dispatch, SetStateAction } from "react";
 
-export type Dict<T = unknown> = Record<string, T>;
+export type Dict<T> = Record<string, T>;
 
 export type AccountMeta = {
   redisName: string;
@@ -15,49 +16,119 @@ export type AnalyticsRange = {
   end?: string;
 };
 
-/** Mirrors the new API payload (snake_case) */
-export type PerformanceMetricsPayload = {
-  meta?: { asOfStartAnchor?: string; initialBalancesDate?: string };
-  window?: { startDay?: string; endDay?: string; mode?: "MTD" };
-  accounts?: string[];
+/* ---------- Performance metrics payload (matches new backend) ---------- */
 
-  /** Point-in-time per-account balances (start-of-window reference) */
-  initial_balances?: Dict<number>;
-
-  /** Daily equity series keyed by timestamp strings */
-  sql_historical_balances?: {
-    realized?: Dict<Dict<number>>; // { "YYYY-MM-DD HH:mm:ss": { fund2, fund3, total } }
-    margin?: Dict<Dict<number>>;
-  };
-
-  /** Optional JSON conveniences coming from the API (not required by UI) */
-  json_balances?: Dict<number>;
-  json_unrealized_balances?: Dict<number>;
-  json_initial_balances?: Dict<number>;
-
-  /** Monthly stats for charts/tooltips */
-  mtdDrawdown?: { realized?: Dict<number>; margin?: Dict<number> };
-  mtdReturn?: { realized?: Dict<number>; margin?: Dict<number> };
-
-  /** Symbol breakdowns */
-  symbolRealizedPnl?: { symbols?: Dict<Dict<number>>; totalPerAccount?: Dict<number> };
-
-  /** Live uPnL snapshot */
-  uPnl?: { as_of?: string; combined?: number; perAccount?: Dict<number> };
-
-  /** Losing days block */
-  losingDays?: Dict<{ consecutive?: number; days?: Dict<number> }>;
-
-  /** Optional legacy compatibility (not required going forward) */
-  balance?: Dict<Dict<number>>;
-  balances?: { realized?: Dict<Dict<number>>; margin?: Dict<Dict<number>> };
-
-  /** Optional combined totals (server-side precomputed) */
-  combinedLiveMonthlyReturn?: { total?: number };
-  combinedLiveMonthlyDrawdown?: { total?: number };
-  combinedLiveMonthlyReturnWithUpnl?: { total?: number };
-  combinedLiveMonthlyDrawdownWithUpnl?: { total?: number };
+export type MetaWindow = {
+  mode: "MTD";
+  startDay: string;
+  endDay: string;
 };
+
+export type MetaFlags = {
+  missingInitialBalanceAccounts?: string[];
+  zeroInitialBalanceAccounts?: string[];
+};
+
+export type MetaBlock = {
+  asOf: string;
+  window: MetaWindow;
+  flags?: MetaFlags;
+};
+
+export type EquityRow = Dict<number>; // { fund2: 123, fund3: 456, total: 579 }
+export type EquitySeries = Dict<EquityRow>; // { "YYYY-MM-DD": EquityRow }
+
+export type EquityBlock = {
+  realized: { series: EquitySeries };
+  margin: {
+    series: EquitySeries;
+    /** last timestamp only with UPnL injected */
+    live: EquitySeries;
+  };
+};
+
+export type ReturnBlock = {
+  /** fractional returns, e.g. 0.0123 for +1.23% */
+  percent: Dict<number>; // per account + total
+  /** absolute dollar P/L since month-open */
+  dollars: Dict<number>; // per account + total
+};
+
+export type ReturnsBlock = {
+  realized: ReturnBlock;
+  margin: ReturnBlock;
+};
+
+export type DrawdownSide = {
+  /** current drawdown vs MTD peak (fractional) per account + total */
+  current: Dict<number>;
+  /** max drawdown over MTD (fractional) per account + total */
+  max: Dict<number>;
+};
+
+export type DrawdownBlock = {
+  realized: DrawdownSide;
+  margin: DrawdownSide;
+};
+
+export type LosingStreak = {
+  consecutive: number;
+  /** { "YYYY-MM-DD": dailyPnL } for the tail of the streak */
+  days: Dict<number>;
+};
+
+export type LosingDaysBlock = {
+  perAccount: Dict<LosingStreak>;
+  combined: LosingStreak; // computed from summed daily PnL across accounts
+};
+
+export type SymbolRow = Dict<number> & { TOTAL: number }; // { fund2, fund3, TOTAL }
+export type SymbolTable = Dict<SymbolRow>;
+
+export type SymbolPnlBlock = {
+  symbols: SymbolTable;
+  totalPerAccount: Dict<number>;
+};
+
+export type UPnLBlock = {
+  asOf: string;
+  perAccount: Dict<number>;
+  combined: number;
+};
+
+export type PerformanceMetricsPayload = {
+  meta: MetaBlock;
+  accounts: string[];
+
+  /** SQL month-open anchors (per account + total) */
+  initialBalances: Dict<number>;
+
+  /** per-account unrealized shift from baseline file (used for margin view) */
+  unrealizedJson: Dict<number>;
+
+  /** convenience: initialBalances + unrealizedJson (per account + total) */
+  initialBalancesWithUnrealized: Dict<number>;
+
+  /** equity time series */
+  equity: EquityBlock;
+
+  /** MTD returns (fraction + dollars) */
+  returns: ReturnsBlock;
+
+  /** MTD drawdowns */
+  drawdown: DrawdownBlock;
+
+  /** losing streaks (exclude today) */
+  losingDays: LosingDaysBlock;
+
+  /** MTD realized PnL by symbol */
+  symbolPnlMTD: SymbolPnlBlock;
+
+  /** live unrealized snapshot */
+  uPnl: UPnLBlock;
+};
+
+/* ---------- Live status & contexts ---------- */
 
 export type LiveStatus = "green" | "yellow" | "red" | "unknown";
 
@@ -82,8 +153,11 @@ export type PerformanceMetricsContextValue = {
   performanceMetrics: PerformanceMetricsPayload | null;
   performanceLoading: boolean;
   performanceError: string | null;
-  performanceAsOf?: string;       // server timestamp from API
-  performanceFetchedAt?: string;  // client timestamp of last successful fetch
-  performanceStatus: LiveStatus;  // derived from asOf vs fetchedAt
+  /** server timestamp from API (derived from payload) */
+  performanceAsOf?: string;
+  /** client timestamp of last successful fetch */
+  performanceFetchedAt?: string;
+  /** derived from asOf vs fetchedAt */
+  performanceStatus: LiveStatus;
   refreshPerformance: () => Promise<void>;
 };

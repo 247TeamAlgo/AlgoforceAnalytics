@@ -1,3 +1,5 @@
+// app/metrics/PerformanceMetricsContext.tsx
+// (adjusted to hit /v1/performance_metrics and send repeated `accounts` params)
 "use client";
 
 import * as React from "react";
@@ -90,12 +92,17 @@ export function PerformanceMetricsProvider({
     setPerformanceLoading(true);
     setPerformanceError(null);
     try {
-      const qs = new URLSearchParams({ accounts: list.join(",") }).toString();
-      const json = await fetchJsonRetry<PerformanceMetricsPayload>(
-        `/api/metrics/bulk?${qs}`
-      );
+      // IMPORTANT: send repeated `accounts` params for FastAPI list[str]
+      const qs = new URLSearchParams();
+      for (const a of list) qs.append("accounts", a);
+      const url = `/api/v1/performance_metrics?${qs.toString()}`;
+
+      const json = await fetchJsonRetry<PerformanceMetricsPayload>(url);
       setPerformanceMetrics(json);
-      setPerformanceAsOf(json?.uPnl?.as_of);
+
+      // New payload uses camelCase `asOf`
+      const asOf = json?.uPnl?.asOf;
+      setPerformanceAsOf(asOf);
       setPerformanceFetchedAt(new Date().toISOString());
     } catch (e) {
       setPerformanceError(e instanceof Error ? e.message : "Fetch failed");

@@ -1,12 +1,11 @@
 "use client";
 
+import { Users } from "lucide-react";
 import Link from "next/link";
-import * as React from "react";
-import { Activity, Users } from "lucide-react";
 
 import { usePrefs } from "@/components/prefs/PrefsContext";
-import { ThemeMenu } from "./ThemeSubmenu";
 import { AccountsDialog } from "../analytics/AccountsDialog";
+import { ThemeMenu } from "./ThemeSubmenu";
 
 /* ---------- helpers ---------- */
 
@@ -41,14 +40,6 @@ function freshnessClasses(status: "green" | "yellow" | "red" | "unknown"): {
         border: "border-muted/40",
       };
   }
-}
-
-function relSince(msNow: number, iso?: string): string {
-  if (!iso) return "unknown";
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return "unknown";
-  const s = Math.max(0, Math.floor((msNow - t) / 1000));
-  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
 function absLabel(iso?: string): { abs?: string; tz?: string } {

@@ -1,8 +1,8 @@
+// components/prefs/PrefsProvider.tsx
 "use client";
 
 import * as React from "react";
 import { AccountsProvider, useAccountsPrefs } from "./AccountsContext";
-
 import {
   PerformanceMetricsProvider,
   usePerformanceMetrics,
@@ -22,13 +22,9 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
   );
 }
 
-/* Aggregator hook for convenience (keeps old import sites happy).
-   Also exposes backward-compat aliases:
-   - metrics* fields are mapped to performance* equivalents.
-*/
+/* Aggregator hook for convenience (keeps old import sites happy) */
 export function usePrefs(): AccountsContextValue &
   PerformanceMetricsContextValue & {
-    // backward-compat aliases
     metrics: PerformanceMetricsContextValue["performanceMetrics"];
     metricsLoading: PerformanceMetricsContextValue["performanceLoading"];
     metricsError: PerformanceMetricsContextValue["performanceError"];
@@ -42,7 +38,7 @@ export function usePrefs(): AccountsContextValue &
   return {
     ...a,
     ...p,
-    // aliases
+    // backward-compat aliases
     metrics: p.performanceMetrics,
     metricsLoading: p.performanceLoading,
     metricsError: p.performanceError,
@@ -52,7 +48,5 @@ export function usePrefs(): AccountsContextValue &
   };
 }
 
-/* Named exports if you want to import slices directly */
 export { useAccountsPrefs } from "./AccountsContext";
 export { usePerformanceMetrics } from "./metrics/PerformanceMetricsContext";
-export * from "./types";

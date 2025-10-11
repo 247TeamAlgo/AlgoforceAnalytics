@@ -14,7 +14,7 @@ import { METRICS_COLORS } from "../combined-performance-metrics/helpers";
 import {
   ApiPayload,
   AccountMini,
-  LosingDaysPayload,
+  LosingDaysPayload, // legacy flat map type expected by helpers.toRows
   Row,
   ThresholdLevel,
 } from "./types";
@@ -39,7 +39,8 @@ function useLosingDaysFromApi(apiUrl?: string) {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = (await res.json()) as ApiPayload;
         if (cancelled) return;
-        setData(json?.losingDays ?? {});
+        // we normalize below in the component; here just pass through
+        setData(json?.losingDays as unknown as LosingDaysPayload);
       } catch (e) {
         if (cancelled) return;
         setError(e instanceof Error ? e.message : String(e));
@@ -149,6 +150,50 @@ function BadgeWithTooltip({
 
 /* ---------------------------------- view ---------------------------------- */
 
+/** Normalize new API shape { perAccount: {...}, combined: {...} } to the flat map helpers.toRows expects. */
+function normalizeToFlatMap(src: unknown): LosingDaysPayload {
+  // Expected legacy flat map: { [accountOrTOTAL]: { consecutive: number, days: { [YYYY-MM-DD]: number } } }
+  const out: LosingDaysPayload = {};
+
+  if (
+    src &&
+    typeof src === "object" &&
+    ("perAccount" in (src as Record<string, unknown>) ||
+      "combined" in (src as Record<string, unknown>))
+  ) {
+    const perAccount =
+      (
+        src as {
+          perAccount?: Record<
+            string,
+            { consecutive?: number; days?: Record<string, number> }
+          >;
+        }
+      ).perAccount ?? {};
+    for (const [acc, v] of Object.entries(perAccount)) {
+      out[acc] = {
+        consecutive: Number(v?.consecutive ?? 0),
+        days: (v?.days ?? {}) as Record<string, number>,
+      };
+    }
+    const combined = (
+      src as {
+        combined?: { consecutive?: number; days?: Record<string, number> };
+      }
+    ).combined;
+    if (combined) {
+      out["combined"] = {
+        consecutive: Number(combined.consecutive ?? 0),
+        days: (combined.days ?? {}) as Record<string, number>,
+      };
+    }
+    return out;
+  }
+
+  // If it's already the legacy shape, just trust it.
+  return (src as LosingDaysPayload) ?? {};
+}
+
 export default function LosingDaysCard({
   apiUrl,
   losingDays,
@@ -164,7 +209,7 @@ export default function LosingDaysCard({
   variant = "list",
 }: {
   apiUrl?: string;
-  losingDays?: LosingDaysPayload;
+  losingDays?: unknown; // new API shape or legacy flat map
   accounts?: AccountMini[];
   levels?: ThresholdLevel[];
   levelColors?: string[];
@@ -173,21 +218,21 @@ export default function LosingDaysCard({
 }) {
   const { data: fetched, loading, error } = useLosingDaysFromApi(apiUrl);
 
-  // Memoize to avoid deps churn warnings
-  const sourceLosingDays: LosingDaysPayload = useMemo(
-    () => (losingDays ?? fetched ?? {}) as LosingDaysPayload,
-    [losingDays, fetched]
-  );
+  // Normalize incoming structure so UI never shows "perAccount" literally
+  const flatSource: LosingDaysPayload = useMemo(() => {
+    const src = losingDays ?? fetched ?? {};
+    return normalizeToFlatMap(src);
+  }, [losingDays, fetched]);
 
   const rows: Row[] = useMemo(
     () =>
       toRows(
-        sourceLosingDays,
+        flatSource,
         levels as ThresholdLevel[],
         levelColors,
         defaultBarColor
       ),
-    [sourceLosingDays, levels, levelColors, defaultBarColor]
+    [flatSource, levels, levelColors, defaultBarColor]
   );
 
   const accountToStrategyMap = useMemo(() => {
@@ -248,7 +293,6 @@ export default function LosingDaysCard({
       </CardHeader>
 
       <CardContent className="p-3">
-        {/* "Total / Accounts" badge intentionally removed */}
         {loading && (
           <div className="mb-2 text-xs text-muted-foreground">Loading…</div>
         )}
@@ -266,6 +310,7 @@ export default function LosingDaysCard({
               {sortedRows.map((r) => {
                 const valueColor = r.color;
                 const isAtOrAboveThreshold = r.current >= firstThreshold;
+                const displayName = r.isTotal ? "Combined" : r.account;
 
                 return (
                   <li
@@ -274,11 +319,11 @@ export default function LosingDaysCard({
                     style={{
                       boxShadow: `inset 0 0 0 2px color-mix(in oklab, ${valueColor} 22%, transparent)`,
                     }}
-                    title={r.account}
+                    title={displayName}
                   >
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium">
-                        {r.account}
+                        {displayName}
                       </div>
                     </div>
 
@@ -293,7 +338,8 @@ export default function LosingDaysCard({
                       <BadgeWithTooltip
                         isLosing={isAtOrAboveThreshold}
                         color={valueColor}
-                        row={r}
+                        // pass display name into tooltip too
+                        row={{ ...r, account: displayName }}
                       />
                     </div>
                   </li>
@@ -307,6 +353,7 @@ export default function LosingDaysCard({
               {sortedRows.map((r) => {
                 const valueColor = r.color;
                 const isAtOrAboveThreshold = r.current >= firstThreshold;
+                const displayName = r.isTotal ? "Combined" : r.account;
 
                 return (
                   <div
@@ -318,12 +365,12 @@ export default function LosingDaysCard({
                   >
                     <div className="flex items-start justify-between gap-1 px-3 pt-2">
                       <div className="break-words text-sm font-medium leading-snug">
-                        {r.account}
+                        {displayName}
                       </div>
                       <BadgeWithTooltip
                         isLosing={isAtOrAboveThreshold}
                         color={valueColor}
-                        row={r}
+                        row={{ ...r, account: displayName }}
                       />
                     </div>
                     <div className="px-3 pb-3 pt-1">

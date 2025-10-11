@@ -1,17 +1,22 @@
+// app/(analytics)/analytics/components/PerformanceMetricsClient.tsx
 "use client";
 
 import { ChevronDown } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import CombinedPerformanceMTDCard from "./performance-metrics/combined-performance-metrics/CombinedPerformanceMTDCard";
-import type { BulkMetricsResponse, DateToRow } from "./performance-metrics/combined-performance-metrics/types";
+import type {
+  BulkMetricsResponse,
+  DateToRow,
+} from "./performance-metrics/combined-performance-metrics/types";
 import LiveUpnlStrip from "./performance-metrics/LiveUpnlStrip";
 import NetPnlList from "./performance-metrics/symbol-pnl/NetPnlList";
 import type { Bucket } from "./performance-metrics/symbol-pnl/types";
 
 import LosingDaysCard from "./performance-metrics/losing-days/ConsecutiveLosingDaysCard";
 import type { AccountMini } from "./performance-metrics/losing-days/types";
-import type { PerformanceMetricsPayload } from "@/components/prefs/types";
+import { EquitySeries, PerformanceMetricsPayload } from "@/components/prefs/types";
+
 
 type Props = {
   accounts: string[];
@@ -44,7 +49,10 @@ const InitialLoadSkeleton = () => {
       <div className="h-10 rounded-lg border bg-card" />
       <div
         className="grid gap-4"
-        style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(220px, 10%)", alignItems: "start" }}
+        style={{
+          gridTemplateColumns: "minmax(0, 1fr) minmax(220px, 10%)",
+          alignItems: "start",
+        }}
       >
         <div className="space-y-4">
           <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
@@ -63,7 +71,7 @@ const InitialLoadSkeleton = () => {
 
 // Pivot (date -> row) => (account -> day)
 function reshapeRealizedToAccountSeries(
-  byDate: DateToRow | undefined,
+  byDate: EquitySeries | undefined,
   accounts: string[]
 ): Record<string, Record<string, number>> | undefined {
   if (!byDate) return undefined;
@@ -87,7 +95,9 @@ export default function PerformanceMetricClient({
   asOf,
   fetchedAt,
 }: Props) {
-  const [hasLoadedOnce, setHasLoadedOnce] = useState<boolean>(Boolean(payload) || Boolean(error));
+  const [hasLoadedOnce, setHasLoadedOnce] = useState<boolean>(
+    Boolean(payload) || Boolean(error)
+  );
   useEffect(() => {
     if (payload || error) setHasLoadedOnce(true);
   }, [payload, error]);
@@ -98,20 +108,26 @@ export default function PerformanceMetricClient({
     const src = payload?.uPnl?.perAccount ?? {};
     const filtered: Record<string, number> = {};
     for (const a of accounts ?? []) {
-      const v = src[a as keyof typeof src];
+      const v = src[a];
       if (typeof v === "number" && Number.isFinite(v)) filtered[a] = v;
       else if (v != null) filtered[a] = Number(v) || 0;
     }
-    const total = Object.values(filtered).reduce((s, v) => s + (Number.isFinite(v) ? v : 0), 0);
-    return { perFiltered: filtered, combinedFiltered: Number.isFinite(total) ? total : 0 };
+    const total = Object.values(filtered).reduce(
+      (s, v) => s + (Number.isFinite(v) ? v : 0),
+      0
+    );
+    return {
+      perFiltered: filtered,
+      combinedFiltered: Number.isFinite(total) ? total : 0,
+    };
   }, [payload, accounts]);
 
   // Symbol PnL rows
   const symbolRows: Bucket[] = useMemo(() => {
-    const symMap = payload?.symbolRealizedPnl?.symbols ?? {};
+    const symMap = payload?.symbolPnlMTD?.symbols ?? {};
     const out: Bucket[] = [];
     for (const [sym, vals] of Object.entries(symMap)) {
-      const total = Number((vals as Record<string, unknown>)?.TOTAL ?? 0);
+      const total = Number(vals.TOTAL ?? 0);
       if (Number.isFinite(total)) out.push({ label: sym, total });
     }
     out.sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
@@ -137,74 +153,77 @@ export default function PerformanceMetricClient({
     }
   }, [payload]);
 
-  // Build realized series for charts from SQL realized
-  const realizedSeriesFromSql = useMemo(
-    () => reshapeRealizedToAccountSeries(payload?.sql_historical_balances?.realized as DateToRow | undefined, accounts),
-    [payload?.sql_historical_balances?.realized, accounts]
+  // Build realized series for charts from API
+  const realizedSeriesFromApi = useMemo(
+    () =>
+      reshapeRealizedToAccountSeries(
+        payload?.equity?.realized?.series,
+        accounts
+      ),
+    [payload?.equity?.realized?.series, accounts]
   );
 
-  // Compose the bulk payload for the card
+  // Prepare the object CombinedPerformanceMTDCard expects
   const combinedBulk: BulkMetricsResponse = useMemo(() => {
     const realized: Record<string, Record<string, number>> | undefined =
-      realizedSeriesFromSql ??
-      (payload?.balances as unknown as { realized?: Record<string, Record<string, number>> })?.realized ??
-      payload?.balance ??
-      undefined;
+      realizedSeriesFromApi;
 
-    const realizedRetTotal =
-      payload?.combinedLiveMonthlyReturn?.total ?? payload?.mtdReturn?.realized?.total;
-    const realizedDdTotal =
-      payload?.combinedLiveMonthlyDrawdown?.total ?? payload?.mtdDrawdown?.realized?.total;
-    const marginRetTotal =
-      payload?.combinedLiveMonthlyReturnWithUpnl?.total ?? payload?.mtdReturn?.margin?.total;
-    const marginDdTotal =
-      payload?.combinedLiveMonthlyDrawdownWithUpnl?.total ?? payload?.mtdDrawdown?.margin?.total;
+    const realizedRetTotal = payload?.returns?.realized?.percent?.total;
+    const realizedDdTotal = payload?.drawdown?.realized?.max?.total;
+    const marginRetTotal = payload?.returns?.margin?.percent?.total;
+    const marginDdTotal = payload?.drawdown?.margin?.max?.total;
+
+    // Reuse the Date->Row maps for header (snake-free)
+    const realizedByDate: DateToRow | undefined =
+      payload?.equity?.realized?.series;
+    const marginByDate: DateToRow | undefined = payload?.equity?.margin?.series;
 
     return {
-      window: payload?.window,
+      window: payload?.meta?.window,
       accounts: payload?.accounts ?? accounts,
 
       balance: realized,
-      balancePreUpnl: undefined, // deprecated for this card path
+      balancePreUpnl: undefined,
 
-      combinedLiveMonthlyReturn: realizedRetTotal == null ? undefined : { total: Number(realizedRetTotal) },
-      combinedLiveMonthlyDrawdown: realizedDdTotal == null ? undefined : { total: Number(realizedDdTotal) },
-      combinedLiveMonthlyReturnWithUpnl: marginRetTotal == null ? undefined : { total: Number(marginRetTotal) },
-      combinedLiveMonthlyDrawdownWithUpnl: marginDdTotal == null ? undefined : { total: Number(marginDdTotal) },
+      combinedLiveMonthlyReturn:
+        realizedRetTotal == null
+          ? undefined
+          : { total: Number(realizedRetTotal) },
+      combinedLiveMonthlyDrawdown:
+        realizedDdTotal == null
+          ? undefined
+          : { total: Number(realizedDdTotal) },
+      combinedLiveMonthlyReturnWithUpnl:
+        marginRetTotal == null ? undefined : { total: Number(marginRetTotal) },
+      combinedLiveMonthlyDrawdownWithUpnl:
+        marginDdTotal == null ? undefined : { total: Number(marginDdTotal) },
 
       mtdReturn: {
-        realized: payload?.mtdReturn?.realized ?? {},
-        margin: payload?.mtdReturn?.margin ?? {},
+        realized: payload?.returns?.realized?.percent ?? {},
+        margin: payload?.returns?.margin?.percent ?? {},
       },
       mtdDrawdown: {
-        realized: payload?.mtdDrawdown?.realized ?? {},
-        margin: payload?.mtdDrawdown?.margin ?? {},
+        realized: payload?.drawdown?.realized?.max ?? {},
+        margin: payload?.drawdown?.margin?.max ?? {},
       },
 
-      // Pass raw SQL sources for the header (snake_case preserved)
       sql_historical_balances: {
-        realized: payload?.sql_historical_balances?.realized as DateToRow | undefined,
-        margin: payload?.sql_historical_balances?.margin as DateToRow | undefined,
+        realized: realizedByDate,
+        margin: marginByDate,
       },
-      initial_balances: payload?.initial_balances,
+      initial_balances: payload?.initialBalances,
     };
   }, [
-    realizedSeriesFromSql,
-    payload?.balances,
-    payload?.balance,
-    payload?.window,
+    realizedSeriesFromApi,
+    payload?.meta?.window,
     payload?.accounts,
-    payload?.combinedLiveMonthlyReturn?.total,
-    payload?.combinedLiveMonthlyDrawdown?.total,
-    payload?.combinedLiveMonthlyReturnWithUpnl?.total,
-    payload?.combinedLiveMonthlyDrawdownWithUpnl?.total,
-    payload?.mtdReturn?.realized,
-    payload?.mtdReturn?.margin,
-    payload?.mtdDrawdown?.realized,
-    payload?.mtdDrawdown?.margin,
-    payload?.sql_historical_balances?.realized,
-    payload?.sql_historical_balances?.margin,
-    payload?.initial_balances,
+    payload?.returns?.realized?.percent,
+    payload?.returns?.margin?.percent,
+    payload?.drawdown?.realized?.max,
+    payload?.drawdown?.margin?.max,
+    payload?.equity?.realized?.series,
+    payload?.equity?.margin?.series,
+    payload?.initialBalances,
     accounts,
   ]);
 
@@ -214,11 +233,18 @@ export default function PerformanceMetricClient({
 
   return (
     <div className="space-y-4">
-      <LiveUpnlStrip combined={combinedFiltered} perAccount={perFiltered} maxAccounts={12} />
+      <LiveUpnlStrip
+        combined={combinedFiltered}
+        perAccount={perFiltered}
+        maxAccounts={12}
+      />
 
       <div
         className="grid gap-4"
-        style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(220px, 10%)", alignItems: "start" }}
+        style={{
+          gridTemplateColumns: "minmax(0, 1fr) minmax(220px, 10%)",
+          alignItems: "start",
+        }}
       >
         <div className="space-y-4">
           <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
@@ -230,7 +256,7 @@ export default function PerformanceMetricClient({
             <NetPnlList
               rows={symbolRows}
               selectedAccounts={accounts}
-              symbolBreakdownMap={payload?.symbolRealizedPnl?.symbols}
+              symbolBreakdownMap={payload?.symbolPnlMTD?.symbols}
             />
           </div>
 
@@ -244,20 +270,31 @@ export default function PerformanceMetricClient({
             >
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium">Developer’s Tool</span>
-                <span className="text-xs text-muted-foreground">{devOpen ? "Hide" : "Show"}</span>
+                <span className="text-xs text-muted-foreground">
+                  {devOpen ? "Hide" : "Show"}
+                </span>
               </div>
-              <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${devOpen ? "rotate-0" : "-rotate-90"}`} />
+              <ChevronDown
+                className={`h-4 w-4 text-muted-foreground transition-transform ${
+                  devOpen ? "rotate-0" : "-rotate-90"
+                }`}
+              />
             </button>
 
             <div className="h-px w-full bg-border" />
 
-            <div className={`transition-[max-height,opacity] duration-200 ease-out overflow-hidden ${devOpen ? "opacity-100 max-h-[600px]" : "opacity-0 max-h-0"}`}>
+            <div
+              className={`transition-[max-height,opacity] duration-200 ease-out overflow-hidden ${
+                devOpen ? "opacity-100 max-h-[600px]" : "opacity-0 max-h-0"
+              }`}
+            >
               <div className="p-3 sm:p-4 text-sm font-mono bg-muted/30">
                 <div className="mb-2 text-xs text-muted-foreground">
                   Accounts: <span className="font-medium">{accountsLabel}</span>
                 </div>
                 <div className="mb-2 text-xs text-muted-foreground">
-                  API as_of: <span className="font-medium">{asOf ?? "—"}</span> • Fetched:{" "}
+                  API as_of: <span className="font-medium">{asOf ?? "—"}</span>{" "}
+                  • Fetched:{" "}
                   <span className="font-medium">{fetchedAt ?? "—"}</span>
                 </div>
 
@@ -268,7 +305,9 @@ export default function PerformanceMetricClient({
                 ) : null}
 
                 <div className="mt-2 max-h-[400px] overflow-y-auto rounded border bg-background px-3 py-2">
-                  <pre className="text-xs whitespace-pre-wrap break-all">{pretty}</pre>
+                  <pre className="text-xs whitespace-pre-wrap break-all">
+                    {pretty}
+                  </pre>
                 </div>
               </div>
             </div>
@@ -277,7 +316,11 @@ export default function PerformanceMetricClient({
 
         {/* RIGHT COLUMN */}
         <div className="row-span-2">
-          <LosingDaysCard losingDays={payload?.losingDays} accounts={accountList} variant="list" />
+          <LosingDaysCard
+            losingDays={payload?.losingDays}
+            accounts={accountList}
+            variant="list"
+          />
         </div>
       </div>
     </div>
