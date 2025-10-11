@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -11,7 +12,7 @@ from ...core.config import now_utc_iso
 from ...db.baseline import read_unrealized_json
 from ...db.redis import read_upnl, upnl_payload
 from ...db.sql import nearest_balance_on_or_before
-from .calculations.drawdown import mtd_drawdown_from_returns
+from .calculations.drawdown import mtd_max_dd_from_levels
 from .calculations.equity import build_fixed_balances, build_margin_series
 from .calculations.losing_days import losing_days_mtd
 from .calculations.pnl_by_symbol import pnl_by_symbol_mtd
@@ -19,18 +20,27 @@ from .calculations.returns import (
     live_return_margin,
     live_return_realized,
     mtd_return,
-    pct_returns,
 )
+
 
 # ---------- Small, typed helpers ----------
 
 
 def _mtd_window_today() -> tuple[pd.Timestamp, pd.Timestamp, pd.Timestamp]:
-    """Return (start_of_month, today_norm, yesterday_norm)."""
-    today = pd.Timestamp.today().normalize()
-    start = today.replace(day=1)
-    yesterday = today - pd.Timedelta(days=1)
-    return start, today, yesterday
+    """Return (start_of_month_local, now_local_floored_to_hour, yesterday_local_normalized).
+
+    Anchored to Europe/Zurich. Returned timestamps are naive (tz removed) but
+    aligned to local time to match the CLI's intraday, hourly-anchored behavior.
+    """
+    tz = ZoneInfo("Europe/Zurich")
+    now_local = pd.Timestamp.now(tz=tz).floor("h")
+    start_local = now_local.normalize().replace(day=1)
+    yesterday_local = now_local.normalize() - pd.Timedelta(days=1)
+    return (
+        start_local.tz_convert(None),
+        now_local.tz_convert(None),
+        yesterday_local.tz_convert(None),
+    )
 
 
 def _serialize_series(df: pd.DataFrame, accounts: list[str]) -> dict[str, dict[str, float]]:
@@ -47,7 +57,7 @@ def _serialize_series(df: pd.DataFrame, accounts: list[str]) -> dict[str, dict[s
 
 
 def _last_index(df: pd.DataFrame) -> pd.Timestamp | None:
-    """Last timestamp or None."""
+    """Return the last timestamp, or None if the DataFrame is empty."""
     if df.empty:
         return None
     try:
@@ -58,8 +68,7 @@ def _last_index(df: pd.DataFrame) -> pd.Timestamp | None:
 
 def _float_scalar(x: object) -> float:
     """Lenient scalar → float with pandas/numpy compatibility, no bare float(obj)."""
-    # Fast path for native numerics
-    if isinstance(x, float | int):  # Ruff UP038-compliant
+    if isinstance(x, float | int):
         return float(x)
     try:
         ser = pd.Series([x])
@@ -87,9 +96,11 @@ def _sum_row(df: pd.DataFrame, idx: pd.Timestamp | None, cols: list[str]) -> flo
 
 
 def _offset_fixed_with_initial(
-    fixed_delta: pd.DataFrame, init_map: dict[str, float], accounts: list[str]
+    fixed_delta: pd.DataFrame,
+    init_map: dict[str, float],
+    accounts: list[str],
 ) -> pd.DataFrame:
-    """Turn per-day deltas into realized equity by adding SQL initial balances."""
+    """Turn per-period deltas into realized equity by adding SQL initial balances."""
     if fixed_delta.empty:
         return fixed_delta
     fixed = fixed_delta.copy()
@@ -102,42 +113,61 @@ def _offset_fixed_with_initial(
 def _live_returns_block(
     accs: list[str],
     fixed: pd.DataFrame,
-    margin: pd.DataFrame,
     init_map: dict[str, float],
     up_map: dict[str, float],
+    unreal_map: dict[str, float],
 ) -> tuple[
-    dict[str, float], dict[str, float], dict[str, float], dict[str, float], float, float, float
+    dict[str, float],
+    dict[str, float],
+    dict[str, float],
+    dict[str, float],
+    float,
+    float,
+    float,
+    float,
 ]:
-    """Compute live realized/margin returns (USD and %) per account and totals."""
+    """Compute live realized/margin returns (USD and %) per account and totals.
+
+    Definitions (matching CLI):
+    - Realized: ((last_realized + upnl) - init) / init
+    - Margin:   ((last_realized + upnl) - (init + unreal_json)) / (init + unreal_json)
+
+    Totals are computed by summation of parts, not by averaging percents.
+    """
     last_ts = _last_index(fixed)
     realized_usd: dict[str, float] = {}
     realized_pct: dict[str, float] = {}
     margin_usd: dict[str, float] = {}
     margin_pct: dict[str, float] = {}
 
+    # Per-account
     for a in accs:
         init = float(init_map.get(a, 0.0))
         last_realized = (
             _float_scalar(fixed.loc[last_ts, a]) if (last_ts and a in fixed.columns) else 0.0
         )
         upnl = float(up_map.get(a, 0.0))
-        ujson = 0.0  # NOTE: json unrealized is accounted via margin series, not here
+        ujson = float(unreal_map.get(a, 0.0))
+
         usd_r, pct_r = live_return_realized(last_realized, init, upnl)
         usd_m, pct_m = live_return_margin(last_realized, init, ujson, upnl)
+
         realized_usd[a], realized_pct[a] = usd_r, pct_r
         margin_usd[a], margin_pct[a] = usd_m, pct_m
 
-    init_total = float(sum(init_map.values()))
+    # Totals
+    init_total = float(sum(init_map.get(a, 0.0) for a in accs))
+    unreal_total = float(sum(unreal_map.get(a, 0.0) for a in accs))
     last_realized_total = _sum_row(fixed, last_ts, accs)
-    last_margin_total = _sum_row(margin, last_ts, accs)
     up_total = float(up_map.get("total", 0.0))
 
-    realized_usd["total"] = (last_realized_total + up_total) - init_total
-    realized_pct["total"] = (
-        ((last_realized_total + up_total) / init_total - 1.0) if init_total else 0.0
-    )
-    margin_usd["total"] = last_margin_total - init_total
-    margin_pct["total"] = (last_margin_total / init_total - 1.0) if init_total else 0.0
+    live_total = last_realized_total + up_total
+    realized_usd["total"] = live_total - init_total
+    realized_pct["total"] = (live_total / init_total - 1.0) if init_total else 0.0
+
+    margin_usd["total"] = live_total - (init_total + unreal_total)
+    denom_margin_total = init_total + unreal_total
+    margin_pct["total"] = (live_total / denom_margin_total - 1.0) if denom_margin_total else 0.0
 
     return (
         realized_usd,
@@ -146,7 +176,8 @@ def _live_returns_block(
         margin_pct,
         init_total,
         last_realized_total,
-        last_margin_total,
+        live_total,
+        unreal_total,
     )
 
 
@@ -156,8 +187,14 @@ def _current_dd_block(
     margin: pd.DataFrame,
     up_map: dict[str, float],
 ) -> tuple[dict[str, float], dict[str, float]]:
-    """Compute current drawdown per account and totals for realized and margin."""
+    """Compute current drawdown per account and totals for realized and margin.
+
+    Realized uses (last_realized + upnl) vs peak of realized.
+    Margin uses margin series levels (which already include unrealized_json baseline
+    and last-row UPNL).
+    """
     last_ts = _last_index(fixed)
+
     fixed_total = fixed.assign(total=fixed[accs].sum(axis=1)) if not fixed.empty else fixed
     margin_total = margin.assign(total=margin[accs].sum(axis=1)) if not margin.empty else margin
 
@@ -169,10 +206,11 @@ def _current_dd_block(
     )
 
     last_realized_total = _sum_row(fixed, last_ts, accs)
-    last_margin_total = _sum_row(margin, last_ts, accs)
     up_total = float(up_map.get("total", 0.0))
-
     curr_realized_total = last_realized_total + up_total
+
+    last_margin_total = _sum_row(margin, last_ts, accs)
+
     curr_dd_realized_total = (
         ((curr_realized_total - peak_fixed_total) / peak_fixed_total) if peak_fixed_total else 0.0
     )
@@ -180,8 +218,8 @@ def _current_dd_block(
         ((last_margin_total - peak_margin_total) / peak_margin_total) if peak_margin_total else 0.0
     )
 
-    current_dd_realized: dict[str, float] = {}
-    current_dd_margin: dict[str, float] = {}
+    current_dd_realized: dict[str, float] = {"total": curr_dd_realized_total}
+    current_dd_margin: dict[str, float] = {"total": curr_dd_margin_total}
 
     for a in accs:
         if not fixed.empty and a in fixed.columns:
@@ -202,8 +240,6 @@ def _current_dd_block(
         else:
             current_dd_margin[a] = 0.0
 
-    current_dd_realized["total"] = curr_dd_realized_total
-    current_dd_margin["total"] = curr_dd_margin_total
     return current_dd_realized, current_dd_margin
 
 
@@ -211,7 +247,13 @@ def _current_dd_block(
 
 
 def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
-    """Return the full metrics payload for requested accounts."""
+    """Return the full metrics payload for requested accounts.
+
+    Alignment with CLI:
+    - Window runs MTD up to *now* (Europe/Zurich), floored to hour.
+    - Current DD uses realized+UPNL vs realized peak; margin uses margin levels.
+    - Max DD is computed from *levels* (not returns) over the MTD window.
+    """
     accs = [a.strip().lower() for a in accounts if a.strip()]
     start_day, today, _yesterday = _mtd_window_today()
 
@@ -224,7 +266,7 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
         if bal == 0.0:
             zero_initial.append(a)
 
-    # Realized equity (SQL deltas + SQL initial)
+    # Realized equity (SQL deltas + SQL initial), hourly through NOW
     fixed_delta, _ = build_fixed_balances(accs, start_day, today)
     fixed = _offset_fixed_with_initial(fixed_delta, init_map, accs)
 
@@ -232,14 +274,12 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
     up_map = read_upnl(accs)
     unreal_map = read_unrealized_json()
 
-    # Margin equity (includes unrealized.json baseline shift + inject UPnL on the last day)
+    # Margin equity (shift by unrealized.json across the index + inject UPNL on the last row)
     margin = build_margin_series(fixed, unreal_map, up_map, accs)
 
-    # Returns blocks (MTD series-based)
+    # Returns blocks (MTD series-based) — series-level MTD% using levels
     fixed_total = fixed.assign(total=fixed[accs].sum(axis=1)) if not fixed.empty else fixed
     margin_total = margin.assign(total=margin[accs].sum(axis=1)) if not margin.empty else margin
-    r_fixed = pct_returns(fixed_total) if not fixed_total.empty else fixed_total
-    r_margin = pct_returns(margin_total) if not margin_total.empty else margin_total
     mtd_ret_realized = mtd_return(fixed_total) if not fixed_total.empty else {}
     mtd_ret_margin = mtd_return(margin_total) if not margin_total.empty else {}
 
@@ -251,13 +291,14 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
         margin_pct,
         init_total,
         _last_realized_total,
-        _last_margin_total,
-    ) = _live_returns_block(accs, fixed, margin, init_map, up_map)
+        _live_total,
+        _unreal_total,
+    ) = _live_returns_block(accs, fixed, init_map, up_map, unreal_map)
 
-    # Drawdowns (current + MTD max)
+    # Drawdowns (current + MTD max from *levels*)
     current_dd_realized, current_dd_margin = _current_dd_block(accs, fixed, margin, up_map)
-    mdd_fixed = mtd_drawdown_from_returns(r_fixed) if not r_fixed.empty else {}
-    mdd_margin = mtd_drawdown_from_returns(r_margin) if not r_margin.empty else {}
+    mdd_fixed = mtd_max_dd_from_levels(fixed_total) if not fixed_total.empty else {}
+    mdd_margin = mtd_max_dd_from_levels(margin_total) if not margin_total.empty else {}
 
     # Losing days (exclude today; combined loss by sum-of-PnL rule)
     losing = losing_days_mtd(accs, day_start_hour=8)

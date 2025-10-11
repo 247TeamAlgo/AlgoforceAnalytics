@@ -1,4 +1,3 @@
-// app/(analytics)/analytics/components/AccountsContext.tsx
 "use client";
 
 import * as React from "react";
@@ -24,26 +23,22 @@ const AccountsContext = createContext<AccountsContextValue | undefined>(
 
 /* ---------- helpers ---------- */
 
-function sleep(ms: number) {
+async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
 function sanitizeAccounts(arr: unknown): AccountMeta[] {
   if (!Array.isArray(arr)) return [];
   return arr
-    .map((a) => {
-      const obj = a as Record<string, unknown>;
-      const redisName = String(obj?.redisName ?? "").trim();
-      const displayRaw = (obj?.display ??
-        obj?.binanceName ??
-        redisName) as unknown;
-      const display =
-        typeof displayRaw === "string" || displayRaw == null
-          ? (displayRaw as string | null)
-          : String(displayRaw);
-      const monitored = Boolean(obj?.monitored);
-      return { redisName, display, monitored };
-    })
+    .map((a) => ({
+      redisName: String((a as AccountMeta)?.redisName ?? "").trim(),
+      display:
+        typeof (a as AccountMeta)?.display === "string" ||
+        (a as AccountMeta)?.display == null
+          ? ((a as AccountMeta)?.display ?? null)
+          : String((a as { display?: unknown }).display),
+      monitored: Boolean((a as AccountMeta)?.monitored),
+    }))
     .filter((a) => a.redisName.length > 0);
 }
 
@@ -54,8 +49,7 @@ async function fetchAccountsOnce(
   let last: unknown;
   for (let i = 0; i <= retries; i += 1) {
     try {
-      // ✅ backend mounts /accounts at root (no /v1)
-      const res = await fetch("/accounts", { cache: "no-store" });
+      const res = await fetch("/api/accounts", { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
       const json: unknown = await res.json();
       const arr = Array.isArray(json)
@@ -93,6 +87,7 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
   const [analyticsEarliest, setAnalyticsEarliest] = useState<boolean>(false);
 
   const navbarVisible = true;
+
   const mountedRef = useRef(false);
 
   const reloadAccounts = useCallback(async () => {
