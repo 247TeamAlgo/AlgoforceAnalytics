@@ -320,7 +320,7 @@ export default function RegularReturnsCard2(): React.ReactNode {
       <CardHeader className="border-b !p-0">
         <div className="px-6 pt-2 pb-3 sm:py-2">
           <CardTitle className="text-base">
-            Regular Returns - Bar Graph
+            Regular Returns - Bar Graph (Initial UI Draft)
           </CardTitle>
 
           {/* Controls */}
