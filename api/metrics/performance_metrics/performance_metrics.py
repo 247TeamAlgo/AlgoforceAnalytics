@@ -22,7 +22,6 @@ from .calculations.returns import (
     mtd_return,
 )
 
-
 # ---------- Small, typed helpers ----------
 
 
@@ -324,6 +323,9 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
         ),
     }
 
+    # print(f"mtd_ret_realized = {mtd_ret_realized}")
+    # print(f"realized_pct = {realized_pct}")
+
     payload: dict[str, object] = {
         "meta": {
             "asOf": now_utc_iso(),
@@ -346,7 +348,8 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
             "margin": {"series": margin_series, "live": margin_live},
         },
         "returns": {
-            "realized": {"percent": {**mtd_ret_realized, **realized_pct}, "dollars": realized_usd},
+            # "realized": {"percent": {**mtd_ret_realized, **realized_pct}, "dollars": realized_usd},
+            "realized": {"percent": {**mtd_ret_realized}, "dollars": realized_usd},
             "margin": {"percent": {**mtd_ret_margin, **margin_pct}, "dollars": margin_usd},
         },
         "drawdown": {

@@ -1,3 +1,4 @@
+// app/(analytics)/analytics/components/performance-metrics/combined-performance-metrics/CombinedPerformanceMTDCard.tsx
 "use client";
 
 import {
@@ -13,7 +14,6 @@ import { HeaderBadges } from "./HeaderBadges";
 import { ReturnChart } from "./ReturnChart";
 import { BulkMetricsResponse, DateToRow } from "./types";
 import { computeSeriesOverWindow } from "./helpers";
-import { MaxDrawdownChart } from "./MaxDrawdownChart";
 
 function sumSelected(
   row: Record<string, number> | undefined,
@@ -46,6 +46,11 @@ function pickDateKey(
   return keys[keys.length - 1] ?? null;
 }
 
+/** Round to 2 decimals without changing non-finite values. */
+function round2(n: number): number {
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : n;
+}
+
 export default function CombinedPerformanceMTDCard({
   bulk,
   selected,
@@ -75,8 +80,8 @@ export default function CombinedPerformanceMTDCard({
     return computeSeriesOverWindow(series, accs, startDay, endDay);
   }, [bulk.balance, bulk.balancePreUpnl, accs, startDay, endDay]);
 
-  // Header from SQL sources
-  const startBal = useMemo(() => {
+  // Header from SQL sources — raw values first
+  const startBalRaw = useMemo(() => {
     const init = bulk.initial_balances ?? {};
     let s = 0;
     for (const a of accs) {
@@ -86,7 +91,7 @@ export default function CombinedPerformanceMTDCard({
     return s;
   }, [bulk.initial_balances, accs]);
 
-  const totalBal = useMemo(() => {
+  const totalBalRaw = useMemo(() => {
     const byDate = bulk.sql_historical_balances?.margin;
     if (byDate) {
       const key = pickDateKey(byDate, endDay);
@@ -109,7 +114,12 @@ export default function CombinedPerformanceMTDCard({
     combinedUpnl,
   ]);
 
-  const deltaBal = totalBal - startBal;
+  const deltaBalRaw = totalBalRaw - startBalRaw;
+
+  // Strictly rounded values (2 decimals) — used ONLY for display in HeaderBadges
+  const startBal = useMemo(() => round2(startBalRaw), [startBalRaw]);
+  const totalBal = useMemo(() => round2(totalBalRaw), [totalBalRaw]);
+  const deltaBal = useMemo(() => round2(deltaBalRaw), [deltaBalRaw]);
 
   // Totals (unchanged)
   const realizedReturn =
@@ -161,7 +171,7 @@ export default function CombinedPerformanceMTDCard({
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 px-6 pt-2 sm:py-3 grid grid-rows-[auto_auto_auto] gap-2">
             <CardTitle className="leading-tight">
-              Combined Performance — MTD
+              Combined Performance
             </CardTitle>
             <CardDescription className="text-sm leading-snug">
               {windowLabel}
@@ -190,18 +200,6 @@ export default function CombinedPerformanceMTDCard({
           barColumnPadX={barColumnPadX}
         />
         <ReturnChart
-          realizedReturn={realizedReturn}
-          marginReturn={marginReturn}
-          realizedBreakdown={realizedReturnMap}
-          marginBreakdown={marginReturnMap}
-          selectedAccounts={accs}
-          upnlReturn={upnlReturn}
-          containerWidth={wrapW}
-          barHeight={barHeight}
-          rowGap={rowGap}
-          barColumnPadX={barColumnPadX}
-        />
-        <MaxDrawdownChart
           realizedReturn={realizedReturn}
           marginReturn={marginReturn}
           realizedBreakdown={realizedReturnMap}

@@ -13,15 +13,15 @@ export type MetricsColors = {
 export const METRICS_COLORS: MetricsColors = {
   railBg: "rgba(148,163,184,0.14)", // neutral rail (works in dark/light)
   guide: "var(--muted-foreground)", // dashed guides / axes
-  realized: "hsl(210 90% 55%)",     // blue
-  margin:  "hsl(28  96% 56%)",      // orange
-  upnl:    "hsl(45  94% 55%)",      // gold
-  pos:     "hsl(152 62% 50%)",      // green (positive PnL)
-  neg:     "hsl(0   84% 62%)",      // red   (negative PnL)
+  realized: "hsl(210 90% 55%)", // blue
+  margin: "hsl(28  96% 56%)", // orange
+  upnl: "hsl(45  94% 55%)", // gold
+  pos: "hsl(152 62% 50%)", // green (positive PnL)
+  neg: "hsl(0   84% 62%)", // red   (negative PnL)
 };
 
 export const REALIZED_COLOR = METRICS_COLORS.realized;
-export const MARGIN_COLOR  = METRICS_COLORS.margin;
+export const MARGIN_COLOR = METRICS_COLORS.margin;
 
 /** Diverging heat for drawdown thresholds: amber -> orange -> red. */
 export function makeDrawdownLevelColors(n: number): string[] {
@@ -29,9 +29,9 @@ export function makeDrawdownLevelColors(n: number): string[] {
   const out: string[] = [];
   for (let i = 0; i < n; i += 1) {
     const t = n === 1 ? 1 : i / (n - 1);
-    const hue = Math.round(35 - 35 * t);   // 35 -> 0
-    const sat = Math.round(96 - 8 * t);    // 96% -> 88%
-    const lig = Math.round(58 - 16 * t);   // 58% -> 42%
+    const hue = Math.round(35 - 35 * t); // 35 -> 0
+    const sat = Math.round(96 - 8 * t); // 96% -> 88%
+    const lig = Math.round(58 - 16 * t); // 58% -> 42%
     out.push(`hsl(${hue} ${sat}% ${lig}%)`);
   }
   return out;
@@ -68,7 +68,6 @@ export function computeSeriesOverWindow(
   return { eq };
 }
 
-
 export function toNum(n: unknown, fallback = 0): number {
   if (typeof n === "number") return Number.isFinite(n) ? n : fallback;
   if (typeof n === "string") {
@@ -83,11 +82,11 @@ export function pct4(n: number): string {
   return `${(v * 100).toFixed(4)}%`;
 }
 
-export function usd6(n: number): string {
+export function usd2(n: number): string {
   const v = Number.isFinite(n) ? n : 0;
   return `${v < 0 ? "-" : ""}$${Math.abs(v).toLocaleString("en-US", {
-    minimumFractionDigits: 6,
-    maximumFractionDigits: 6,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   })}`;
 }
 

@@ -10,19 +10,12 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ChevronDown } from "lucide-react";
+import { METRICS_COLORS } from "../combined-performance-metrics/helpers";
 
 /* ------------------------------- types -------------------------------- */
-
 type Range = "Daily" | "Weekly" | "Monthly";
-
-type SeriesPoint = {
-  key: string; // "YYYY-MM-DD 08:00"
-  labelDate: Date; // midnight of the day/week/month bucket
-  value: number; // return fraction [-1..+1]
-};
-
+type SeriesPoint = { key: string; labelDate: Date; value: number };
 type RecordMap = Record<string, number>;
-
 type MemoState = {
   record: RecordMap;
   daily: SeriesPoint[];
@@ -31,9 +24,7 @@ type MemoState = {
 };
 
 /* --------------------------- date utilities --------------------------- */
-
 const CUT_HOUR = 8;
-
 function normalizeDate(d: Date): Date {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
@@ -66,8 +57,8 @@ function lastCompleteLabel(now: Date, cutHour: number): Date | null {
 }
 function startOfWeekMonday(d: Date): Date {
   const x = normalizeDate(d);
-  const mondayOffset = (x.getDay() + 6) % 7;
-  x.setDate(x.getDate() - mondayOffset);
+  const off = (x.getDay() + 6) % 7;
+  x.setDate(x.getDate() - off);
   return x;
 }
 function startOfMonth(d: Date): Date {
@@ -77,7 +68,6 @@ function startOfMonth(d: Date): Date {
 }
 
 /* --------------------------- seeded randomness --------------------------- */
-
 function hashStringTo32(s: string): number {
   let h = 2166136261 >>> 0;
   for (let i = 0; i < s.length; i += 1) {
@@ -99,7 +89,6 @@ function seededSignedPercent(seed: string, maxAbs: number): number {
 }
 
 /* --------------------------- series generation --------------------------- */
-
 function buildDailySeries(
   last3MonthsStart: Date,
   lastLabel: Date,
@@ -110,13 +99,12 @@ function buildDailySeries(
   if (cur > lastLabel) return out;
   while (cur <= lastLabel) {
     const key = formatKeyWithCut(cur, cutHour);
-    const value = seededSignedPercent(key, 0.08); // ±8%
+    const value = seededSignedPercent(key, 0.08);
     out.push({ key, labelDate: new Date(cur), value });
     cur = addDays(cur, 1);
   }
   return out;
 }
-
 function groupAverage(
   pts: SeriesPoint[],
   grouper: (d: Date) => { key: string; labelDate: Date },
@@ -144,15 +132,14 @@ function groupAverage(
 }
 
 /* ------------------------------ formatting ------------------------------ */
-
-function pct1(n: number): string {
-  return `${(n * 100).toFixed(1)}%`;
+function pct2(n: number): string {
+  return `${(n * 100).toFixed(2)}%`;
 }
 function fmtShortLabel(range: Range, d: Date): string {
   if (range === "Daily")
     return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
   if (range === "Weekly")
-    return `Wk of ${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+    return `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
   return d.toLocaleDateString(undefined, { month: "short", year: "numeric" });
 }
 function periodStart(range: Range, base: Date): Date {
@@ -192,16 +179,15 @@ function fmtRange(start: Date, end: Date): string {
 }
 function toInputValueLocal(dt: Date): string {
   const pad = (n: number) => `${n}`.padStart(2, "0");
-  const y = dt.getFullYear();
-  const m = pad(dt.getMonth() + 1);
-  const d = pad(dt.getDate());
-  const hh = pad(dt.getHours());
-  const mm = pad(dt.getMinutes());
+  const y = dt.getFullYear(),
+    m = pad(dt.getMonth() + 1),
+    d = pad(dt.getDate()),
+    hh = pad(dt.getHours()),
+    mm = pad(dt.getMinutes());
   return `${y}-${m}-${d}T${hh}:${mm}`;
 }
 
 /* --------------------------------- view --------------------------------- */
-
 export default function RegularReturnsCard2(): React.ReactNode {
   const [range, setRange] = useState<Range>("Daily");
 
@@ -209,16 +195,12 @@ export default function RegularReturnsCard2(): React.ReactNode {
     const now = new Date();
     const lastLabel = lastCompleteLabel(now, CUT_HOUR);
     if (!lastLabel) return { record: {}, daily: [] };
-
     const threeMonthsAgo = addMonths(lastLabel, -3);
     const daily = buildDailySeries(threeMonthsAgo, lastLabel, CUT_HOUR);
-
     const rec: RecordMap = {};
     for (const p of daily) rec[p.key] = p.value;
-
     const domainStart = periodStart("Daily", daily[0]!.labelDate);
     const domainEnd = periodEnd("Daily", daily[daily.length - 1]!.labelDate);
-
     return { record: rec, daily, domainStart, domainEnd };
   }, []);
 
@@ -227,7 +209,6 @@ export default function RegularReturnsCard2(): React.ReactNode {
   const domainStart = memo.domainStart;
   const domainEnd = memo.domainEnd;
 
-  /* ---- date range state + validation ---- */
   const [startAt, setStartAt] = useState<Date | null>(domainStart ?? null);
   const [endAt, setEndAt] = useState<Date | null>(domainEnd ?? null);
 
@@ -259,7 +240,6 @@ export default function RegularReturnsCard2(): React.ReactNode {
     return null;
   }, [startAt, endAt, domainStart, domainEnd]);
 
-  // Filter base daily series within [startAt, endAt)
   const dailyFiltered: SeriesPoint[] = useMemo(() => {
     if (!startAt || !endAt || rangeError) return dailySeries;
     return dailySeries.filter((p) => {
@@ -268,7 +248,6 @@ export default function RegularReturnsCard2(): React.ReactNode {
     });
   }, [dailySeries, startAt, endAt, rangeError]);
 
-  // Aggregate by current range
   const displayed: SeriesPoint[] = useMemo(() => {
     if (dailyFiltered.length === 0) return [];
     if (range === "Daily") return dailyFiltered;
@@ -276,11 +255,8 @@ export default function RegularReturnsCard2(): React.ReactNode {
       return groupAverage(
         dailyFiltered,
         (d: Date) => {
-          const wkStart = startOfWeekMonday(d);
-          return {
-            key: formatKeyWithCut(wkStart, CUT_HOUR),
-            labelDate: wkStart,
-          };
+          const wk = startOfWeekMonday(d);
+          return { key: formatKeyWithCut(wk, CUT_HOUR), labelDate: wk };
         },
         CUT_HOUR
       );
@@ -288,11 +264,8 @@ export default function RegularReturnsCard2(): React.ReactNode {
     return groupAverage(
       dailyFiltered,
       (d: Date) => {
-        const monStart = startOfMonth(d);
-        return {
-          key: formatKeyWithCut(monStart, CUT_HOUR),
-          labelDate: monStart,
-        };
+        const mo = startOfMonth(d);
+        return { key: formatKeyWithCut(mo, CUT_HOUR), labelDate: mo };
       },
       CUT_HOUR
     );
@@ -304,16 +277,21 @@ export default function RegularReturnsCard2(): React.ReactNode {
     return Math.max(m, 0.01);
   }, [displayed]);
 
-  // X tick sampling: keep labels readable (≤ ~10)
   const maxXTicks = 10;
   const step = Math.max(1, Math.ceil(displayed.length / maxXTicks));
 
-  // Layout
-  const PLOT_H = 280;
-  const GUTTER_LEFT = 56;
-  const GUTTER_RIGHT = 10;
-  const GUTTER_TOP = 10;
-  const GUTTER_BOTTOM = 44;
+  const PLOT_H = 280,
+    GUTTER_LEFT = 56,
+    GUTTER_RIGHT = 10,
+    GUTTER_TOP = 10,
+    GUTTER_BOTTOM = 44;
+
+  // Combined: simple average of displayed points
+  const combinedValue: number = useMemo(() => {
+    if (!displayed.length) return 0;
+    const s = displayed.reduce((acc, p) => acc + p.value, 0);
+    return s / displayed.length;
+  }, [displayed]);
 
   return (
     <Card className="py-0">
@@ -323,8 +301,9 @@ export default function RegularReturnsCard2(): React.ReactNode {
             Regular Returns - Bar Graph (Initial UI Draft)
           </CardTitle>
 
-          {/* Controls */}
+          {/* Controls row — Combined chip placed immediately to the RIGHT of the Range dropdown */}
           <div className="mt-2 flex flex-wrap items-center gap-4">
+            {/* Range */}
             <label
               htmlFor="rr-bar-range"
               className="text-sm text-muted-foreground"
@@ -343,14 +322,34 @@ export default function RegularReturnsCard2(): React.ReactNode {
                 <option value="Weekly">Weekly</option>
                 <option value="Monthly">Monthly</option>
               </select>
-              {/* tighter chevron to right edge */}
               <ChevronDown
                 className="pointer-events-none absolute top-1/2 -translate-y-1/2 right-2 h-4 w-4 text-muted-foreground"
                 aria-hidden="true"
               />
             </div>
 
-            {/* Date range */}
+            {/* Combined chip — right after the dropdown */}
+            <div
+              className="flex items-center justify-between rounded-lg border bg-card px-3 py-2"
+              style={{
+                boxShadow: `inset 0 0 0 2px color-mix(in oklab, ${METRICS_COLORS.margin} 22%, transparent)`,
+              }}
+              title="Combined"
+            >
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium">Combined</div>
+              </div>
+              <div className="ml-3 flex items-center gap-2">
+                <span
+                  className="text-2xl font-bold leading-none tracking-tight tabular-nums"
+                  style={{ color: METRICS_COLORS.margin }}
+                >
+                  {pct2(combinedValue)}
+                </span>
+              </div>
+            </div>
+
+            {/* Date range (follows after chip) */}
             <div className="flex items-center gap-2">
               <label
                 htmlFor="rr-start"
@@ -413,14 +412,14 @@ export default function RegularReturnsCard2(): React.ReactNode {
                   {/* Zero line */}
                   <div className="absolute inset-x-0 top-1/2 border-t border-border/60" />
 
-                  {/* Bars in grid */}
+                  {/* Bars */}
                   <div
                     className="relative h-full grid items-end gap-[4px]"
                     style={{
                       gridTemplateColumns: `repeat(${displayed.length}, minmax(0,1fr))`,
                     }}
                   >
-                    {displayed.map((p) => {
+                    {displayed.map((p, i) => {
                       const hFrac = Math.min(Math.abs(p.value) / maxAbs, 1);
                       const halfHeightPct = `${(hFrac * 50).toFixed(2)}%`;
                       const isPos = p.value >= 0;
@@ -429,7 +428,6 @@ export default function RegularReturnsCard2(): React.ReactNode {
                         : "hsl(0 72% 51%)";
                       const pStart = periodStart(range, p.labelDate);
                       const pEnd = periodEnd(range, pStart);
-
                       return (
                         <Tooltip key={p.key}>
                           <TooltipTrigger asChild>
@@ -441,7 +439,7 @@ export default function RegularReturnsCard2(): React.ReactNode {
                                   top: isPos ? undefined : "50%",
                                   height: halfHeightPct,
                                 }}
-                                aria-label={`${pct1(p.value)} • ${
+                                aria-label={`${pct2(p.value)} • ${
                                   range === "Daily"
                                     ? `${pStart.toLocaleDateString(undefined, { month: "short", day: "numeric" })} (8:00 → next 8:00)`
                                     : fmtRange(pStart, pEnd)
@@ -463,7 +461,7 @@ export default function RegularReturnsCard2(): React.ReactNode {
                             side="top"
                             className="p-2 rounded-md border bg-popover text-popover-foreground shadow-md text-xs"
                           >
-                            <div className="font-medium">{pct1(p.value)}</div>
+                            <div className="font-medium">{pct2(p.value)}</div>
                             <div className="text-muted-foreground">
                               {range === "Daily"
                                 ? `${pStart.toLocaleString(undefined, { month: "short", day: "numeric" })} (8:00 → next 8:00)`
@@ -488,7 +486,7 @@ export default function RegularReturnsCard2(): React.ReactNode {
                 >
                   <div className="absolute left-0 right-0" style={{ top: 0 }}>
                     <div className="flex items-center justify-end pr-1">
-                      +{pct1(maxAbs)}
+                      +{pct2(maxAbs)}
                     </div>
                   </div>
                   <div
@@ -502,7 +500,7 @@ export default function RegularReturnsCard2(): React.ReactNode {
                     style={{ bottom: 0 }}
                   >
                     <div className="flex items-center justify-end pr-1">
-                      −{pct1(maxAbs)}
+                      −{pct2(maxAbs)}
                     </div>
                   </div>
                   <div
@@ -516,7 +514,7 @@ export default function RegularReturnsCard2(): React.ReactNode {
                   </div>
                 </div>
 
-                {/* X-axis labels — CENTERED on bars; sampling to avoid cramming */}
+                {/* X-axis labels */}
                 <div
                   className="absolute text-[11px] text-muted-foreground"
                   style={{
@@ -530,11 +528,11 @@ export default function RegularReturnsCard2(): React.ReactNode {
                     {displayed.map((p, i) => {
                       const show = i % step === 0 || i === displayed.length - 1;
                       if (!show) return null;
-                      // position at bar center
                       const xPct = ((i + 0.5) / displayed.length) * 100;
                       const txt = fmtShortLabel(range, p.labelDate);
                       return (
                         <div
+                          suppressHydrationWarning
                           key={`xlabel-${p.key}`}
                           className="absolute -translate-x-1/2 whitespace-nowrap text-center"
                           style={{ left: `${xPct}%`, bottom: 0 }}
@@ -550,7 +548,6 @@ export default function RegularReturnsCard2(): React.ReactNode {
           </TooltipProvider>
         )}
 
-        {/* keep record referenced for lints */}
         <span className="sr-only">{Object.keys(record).length} points</span>
       </CardContent>
     </Card>

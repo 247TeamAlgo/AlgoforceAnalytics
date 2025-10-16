@@ -236,7 +236,7 @@ export function ReturnChart({
   return (
     <div className="rounded-xl border bg-card/40 p-4 sm:p-5">
       <div className="mb-2 text-sm sm:text-base font-medium text-foreground">
-        Return (MTD)
+        Return
       </div>
 
       <div

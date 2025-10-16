@@ -19,8 +19,8 @@ import {
   EquitySeries,
   PerformanceMetricsPayload,
 } from "@/components/prefs/types";
-import RegularReturnsCard from "./performance-metrics/regular-returns/RegularReturnsCard";
 import RegularReturnsBarGraph from "./performance-metrics/regular-returns/RegularReturnsCard2";
+import { MaxDrawdownChart } from "./performance-metrics/combined-performance-metrics/MaxDrawdownChart";
 
 type Props = {
   accounts: string[];
@@ -235,6 +235,12 @@ export default function PerformanceMetricClient({
 
   if (initialLoading) return <InitialLoadSkeleton />;
 
+  const maxDdRealizedTotal: number = Number(
+    payload?.drawdown?.realized?.max?.total ?? 0
+  );
+  const maxDdRealizedMap: Record<string, number> | undefined =
+    payload?.drawdown?.realized?.max ?? undefined;
+
   return (
     <div className="space-y-4">
       <LiveUpnlStrip
@@ -330,7 +336,11 @@ export default function PerformanceMetricClient({
             accounts={accountList}
             variant="list"
           />
-          <RegularReturnsCard />
+          <MaxDrawdownChart
+            realizedReturn={maxDdRealizedTotal}
+            realizedBreakdown={maxDdRealizedMap}
+            selectedAccounts={accounts}
+          />
         </div>
       </div>
     </div>
