@@ -203,6 +203,7 @@ def _live_returns_block(
     denom_margin_total = init_total + unreal_total
     margin_pct["total"] = (live_total / denom_margin_total - 1.0) if denom_margin_total else 0.0
 
+    # NOTE: return the *defined* locals, not underscored names
     return (
         realized_usd,
         realized_pct,
@@ -341,9 +342,9 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
         margin_usd,
         margin_pct,
         init_total,
-        _last_realized_total,
-        _live_total,
-        _unreal_total,
+        _last_realized_total,  # intentionally unused; keep for debugging
+        _live_total,  # intentionally unused; keep for debugging
+        _unreal_total,  # intentionally unused; keep for debugging
     ) = _live_returns_block(accs, fixed, init_map, up_map, unreal_map)
 
     # Drawdowns (current + MTD max from *levels*)
@@ -354,7 +355,7 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
     # Losing days (exclude today; combined loss by sum-of-PnL rule)
     losing = losing_days_mtd(accs, day_start_hour=8)
 
-    # PnL per symbol (realized only) — window uses [start_day, today]
+    # PnL per symbol (realized only)
     symbols, totals_by_acc = pnl_by_symbol_mtd(accs, str(start_day.date()), str(today.date()))
 
     # Serialize equity blocks
@@ -376,6 +377,64 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
             sum(init_map.get(a, 0.0) for a in accs) + sum(unreal_map.get(a, 0.0) for a in accs)
         ),
     }
+
+    # ---------------- Strategy rollups (Janus/Charm) ----------------
+    janus_accs = [a for a in accs if a.lower() in {"fund2"}]
+    charm_accs = [a for a in accs if a.lower() in {"fund3"}]
+
+    def _subset_up(up_full: dict[str, float], subset: list[str]) -> dict[str, float]:
+        sub = {a: float(up_full.get(a, 0.0)) for a in subset}
+        sub["total"] = float(sum(sub.values()))
+        return sub
+
+    def _strategy_metrics(subset: list[str]) -> tuple[float, float, float, float]:
+        """Return (dd_realized, dd_margin, ret_realized, ret_margin) for a subset."""
+        if not subset:
+            return 0.0, 0.0, 0.0, 0.0
+
+        fixed_sub = fixed.loc[:, fixed.columns.intersection(subset)]
+        margin_sub = margin.loc[:, margin.columns.intersection(subset)]
+
+        fixed_total_pure_sub = (
+            fixed_sub.assign(total=fixed_sub[subset].sum(axis=1))
+            if not fixed_sub.empty
+            else fixed_sub
+        )
+        up_sub = _subset_up(up_map, subset)
+        fixed_with_up_sub = _inject_upnl_last_row(fixed_sub, up_sub, subset)
+        fixed_total_with_up_sub = (
+            fixed_with_up_sub.assign(total=fixed_with_up_sub[subset].sum(axis=1))
+            if not fixed_with_up_sub.empty
+            else fixed_with_up_sub
+        )
+        margin_total_sub = (
+            margin_sub.assign(total=margin_sub[subset].sum(axis=1))
+            if not margin_sub.empty
+            else margin_sub
+        )
+
+        ret_realized_map = (
+            mtd_return(fixed_total_with_up_sub) if not fixed_total_with_up_sub.empty else {}
+        )
+        ret_margin_map = mtd_return(margin_total_sub) if not margin_total_sub.empty else {}
+
+        ret_realized = float(ret_realized_map.get("total", 0.0))
+        ret_margin = float(ret_margin_map.get("total", 0.0))
+
+        mdd_realized_map = (
+            mtd_max_dd_from_levels(fixed_total_pure_sub) if not fixed_total_pure_sub.empty else {}
+        )
+        mdd_margin_map = (
+            mtd_max_dd_from_levels(margin_total_sub) if not margin_total_sub.empty else {}
+        )
+
+        dd_realized = float(mdd_realized_map.get("total", 0.0))
+        dd_margin = float(mdd_margin_map.get("total", 0.0))
+
+        return dd_realized, dd_margin, ret_realized, ret_margin
+
+    janus_dd_r, janus_dd_m, janus_ret_r, janus_ret_m = _strategy_metrics(janus_accs)
+    charm_dd_r, charm_dd_m, charm_ret_r, charm_ret_m = _strategy_metrics(charm_accs)
 
     payload: dict[str, object] = {
         "meta": {
@@ -399,7 +458,6 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
             "margin": {"series": margin_series, "live": margin_live},
         },
         "returns": {
-            # Realized: expose both; use "percent" as WITH-UPnL to reflect live MTD
             "realized": {
                 "percent": {**mtd_ret_realized_with_upnl},
                 "percentPure": {**mtd_ret_realized_pure},
@@ -414,5 +472,27 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
         "losingDays": losing,
         "symbolPnlMTD": {"symbols": symbols, "totalPerAccount": totals_by_acc},
         "uPnl": upnl_payload(accs),
+        "combined_coint_strategy": {
+            "drawdown": {
+                "realized": {
+                    "janus_coint": janus_dd_r,
+                    "charm_coint": charm_dd_r,
+                },
+                "margin": {
+                    "janus_coint": janus_dd_m,
+                    "charm_coint": charm_dd_m,
+                },
+            },
+            "return": {
+                "realized": {
+                    "janus_coint": janus_ret_r,
+                    "charm_coint": charm_ret_r,
+                },
+                "margin": {
+                    "janus_coint": janus_ret_m,
+                    "charm_coint": charm_ret_m,
+                },
+            },
+        },
     }
     return payload

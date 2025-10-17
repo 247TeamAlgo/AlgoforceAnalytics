@@ -9,6 +9,7 @@ import CombinedPerformanceStratMTDCard from "./performance-metrics/combined-perf
 import type {
   BulkMetricsResponse,
   DateToRow,
+  CombinedCointStrategy,
 } from "./performance-metrics/combined-performance-metrics/types";
 import LiveUpnlStrip from "./performance-metrics/LiveUpnlStrip";
 import NetPnlList from "./performance-metrics/symbol-pnl/NetPnlList";
@@ -183,6 +184,11 @@ export default function PerformanceMetricClient({
       payload?.equity?.realized?.series;
     const marginByDate: DateToRow | undefined = payload?.equity?.margin?.series;
 
+    // Typed: bring snake_case API into a typed field for cards
+    const combinedCointStrategy: CombinedCointStrategy | undefined =
+      (payload?.combined_coint_strategy as CombinedCointStrategy | undefined) ??
+      undefined;
+
     return {
       window: payload?.meta?.window,
       accounts: payload?.accounts ?? accounts,
@@ -217,6 +223,9 @@ export default function PerformanceMetricClient({
         margin: marginByDate,
       },
       initial_balances: payload?.initialBalances,
+
+      // Strategy rollups for CombinedPerformanceStratMTDCard
+      combinedCointStrategy,
     };
   }, [
     realizedSeriesFromApi,
@@ -229,6 +238,7 @@ export default function PerformanceMetricClient({
     payload?.equity?.realized?.series,
     payload?.equity?.margin?.series,
     payload?.initialBalances,
+    payload?.combined_coint_strategy,
     accounts,
   ]);
 

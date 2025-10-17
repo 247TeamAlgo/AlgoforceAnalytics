@@ -1,11 +1,22 @@
-export type DateRow = Record<string, number>;           // e.g. { fund2: 123, fund3: 456, total: 579 }
-export type DateToRow = Record<string, DateRow>;        // e.g. { "2025-10-07 00:00:00": DateRow }
+// app/(analytics)/analytics/components/performance-metrics/combined-performance-metrics/types.ts
+export type DateRow = Record<string, number>;
+export type DateToRow = Record<string, DateRow>;
+
+export type CombinedCointStrategy = {
+  drawdown: {
+    realized: Record<string, number>; // keys: "janus_coint", "charm_coint", ...
+    margin: Record<string, number>;
+  };
+  return: {
+    realized: Record<string, number>;
+    margin: Record<string, number>;
+  };
+};
 
 export type BulkMetricsResponse = {
   window?: { startDay?: string; endDay?: string; mode?: string };
   accounts?: string[];
 
-  // Charts expect account -> day -> value (realized equity series)
   balance?: Record<string, Record<string, number>>;
   balancePreUpnl?: Record<string, Record<string, number>>;
 
@@ -15,7 +26,7 @@ export type BulkMetricsResponse = {
   combinedLiveMonthlyDrawdownWithUpnl?: { total?: number };
 
   mtdReturn?: {
-    realized?: Record<string, number>;  // keys: accounts + "total"
+    realized?: Record<string, number>;
     margin?: Record<string, number>;
   };
   mtdDrawdown?: {
@@ -23,7 +34,9 @@ export type BulkMetricsResponse = {
     margin?: Record<string, number>;
   };
 
-  // NEW: mirror API naming for header inputs
   sql_historical_balances?: { realized?: DateToRow; margin?: DateToRow };
   initial_balances?: Record<string, number>;
+
+  // NEW: strategy rollups passed through from API
+  combinedCointStrategy?: CombinedCointStrategy;
 };

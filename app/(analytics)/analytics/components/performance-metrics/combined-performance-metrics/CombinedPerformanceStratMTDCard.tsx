@@ -37,7 +37,7 @@ export default function CombinedPerformanceStratMTDCard({
       ? `${bulk.window.startDay} → ${bulk.window.endDay}`
       : "MTD";
 
-  // header balances (unchanged)
+  // header balances
   const startBal = round2(
     (bulk.initial_balances
       ? accs.reduce(
@@ -49,32 +49,23 @@ export default function CombinedPerformanceStratMTDCard({
   const totalBal = startBal + round2(combinedUpnl);
   const deltaBal = round2(totalBal - startBal);
 
-  // --- STRATEGY DEFINITIONS (DUMMY VALUES FOR NOW) ---
-  const strategies: Array<{
-    title: string;
-    accounts: string[];
-    realizedDD: number;
-    marginDD: number;
-    realizedRet: number;
-    marginRet: number;
-  }> = [
-    {
-      title: "Janus Coint",
-      accounts: ["fund2"],
-      realizedDD: -0.019314,
-      marginDD: -0.019413,
-      realizedRet: -0.014717,
-      marginRet: -0.012618,
-    },
-    {
-      title: "Charm Coint",
-      accounts: ["fund3"],
-      realizedDD: -0.019314,
-      marginDD: -0.019413,
-      realizedRet: -0.014717,
-      marginRet: -0.012618,
-    },
-  ];
+  // ---- Read strategy rollups from API payload ----
+  const cs = bulk.combinedCointStrategy;
+  // Fallback to zeros if the API block is missing
+  const janus = {
+    accounts: ["fund2"],
+    realizedDD: Number(cs?.drawdown?.realized?.janus_coint ?? 0),
+    marginDD: Number(cs?.drawdown?.margin?.janus_coint ?? 0),
+    realizedRet: Number(cs?.return?.realized?.janus_coint ?? 0),
+    marginRet: Number(cs?.return?.margin?.janus_coint ?? 0),
+  };
+  const charm = {
+    accounts: ["fund3"],
+    realizedDD: Number(cs?.drawdown?.realized?.charm_coint ?? 0),
+    marginDD: Number(cs?.drawdown?.margin?.charm_coint ?? 0),
+    realizedRet: Number(cs?.return?.realized?.charm_coint ?? 0),
+    marginRet: Number(cs?.return?.margin?.charm_coint ?? 0),
+  };
 
   // responsive sizes (match charts)
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -123,7 +114,7 @@ export default function CombinedPerformanceStratMTDCard({
           className="grid gap-x-2"
           style={{ gridTemplateColumns: "96px 1fr 1fr" }}
         >
-          {/* Left label column */}
+          {/* Left label column — tighter */}
           <div className="pt-1">
             <div className="mb-2 text-sm sm:text-base font-medium text-foreground">
               Drawdown
@@ -137,7 +128,7 @@ export default function CombinedPerformanceStratMTDCard({
             </div>
           </div>
 
-          {/* Strategy: Janus */}
+          {/* Janus */}
           <div>
             <div className="text-center text-sm font-medium mb-1">
               Janus Coint
@@ -146,16 +137,16 @@ export default function CombinedPerformanceStratMTDCard({
               title={null}
               realizedLabel={false}
               marginLabel={false}
-              realizedDD={strategies[0]!.realizedDD}
-              marginDD={strategies[0]!.marginDD}
-              selectedAccounts={strategies[0]!.accounts}
+              realizedDD={janus.realizedDD}
+              marginDD={janus.marginDD}
+              selectedAccounts={janus.accounts}
               barHeight={barHeight}
               rowGap={rowGap}
               barColumnPadX={barColumnPadX}
             />
           </div>
 
-          {/* Strategy: Charm */}
+          {/* Charm */}
           <div>
             <div className="text-center text-sm font-medium mb-1">
               Charm Coint
@@ -164,9 +155,9 @@ export default function CombinedPerformanceStratMTDCard({
               title={null}
               realizedLabel={false}
               marginLabel={false}
-              realizedDD={strategies[1]!.realizedDD}
-              marginDD={strategies[1]!.marginDD}
-              selectedAccounts={strategies[1]!.accounts}
+              realizedDD={charm.realizedDD}
+              marginDD={charm.marginDD}
+              selectedAccounts={charm.accounts}
               barHeight={barHeight}
               rowGap={rowGap}
               barColumnPadX={barColumnPadX}
@@ -179,7 +170,7 @@ export default function CombinedPerformanceStratMTDCard({
           className="grid gap-x-2"
           style={{ gridTemplateColumns: "96px 1fr 1fr" }}
         >
-          {/* Left label column */}
+          {/* Left label column — tighter */}
           <div className="pt-1">
             <div className="mb-2 text-sm sm:text-base font-medium text-foreground">
               Return
@@ -193,7 +184,7 @@ export default function CombinedPerformanceStratMTDCard({
             </div>
           </div>
 
-          {/* Strategy: Janus */}
+          {/* Janus */}
           <div>
             <div className="text-center text-sm font-medium mb-1">
               Janus Coint
@@ -202,18 +193,18 @@ export default function CombinedPerformanceStratMTDCard({
               title={null}
               realizedLabel={false}
               marginLabel={false}
-              realizedReturn={strategies[0]!.realizedRet}
-              marginReturn={strategies[0]!.marginRet}
-              selectedAccounts={strategies[0]!.accounts}
+              realizedReturn={janus.realizedRet}
+              marginReturn={janus.marginRet}
+              selectedAccounts={janus.accounts}
               containerWidth={wrapW}
-              upnlReturn={strategies[0]!.marginRet - strategies[0]!.realizedRet}
+              upnlReturn={janus.marginRet - janus.realizedRet}
               barHeight={barHeight}
               rowGap={rowGap}
               barColumnPadX={barColumnPadX}
             />
           </div>
 
-          {/* Strategy: Charm */}
+          {/* Charm */}
           <div>
             <div className="text-center text-sm font-medium mb-1">
               Charm Coint
@@ -222,11 +213,11 @@ export default function CombinedPerformanceStratMTDCard({
               title={null}
               realizedLabel={false}
               marginLabel={false}
-              realizedReturn={strategies[1]!.realizedRet}
-              marginReturn={strategies[1]!.marginRet}
-              selectedAccounts={strategies[1]!.accounts}
+              realizedReturn={charm.realizedRet}
+              marginReturn={charm.marginRet}
+              selectedAccounts={charm.accounts}
               containerWidth={wrapW}
-              upnlReturn={strategies[1]!.marginRet - strategies[1]!.realizedRet}
+              upnlReturn={charm.marginRet - charm.realizedRet}
               barHeight={barHeight}
               rowGap={rowGap}
               barColumnPadX={barColumnPadX}

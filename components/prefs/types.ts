@@ -96,6 +96,17 @@ export type UPnLBlock = {
   combined: number;
 };
 
+export type CombinedCointStrategy = {
+  drawdown: {
+    realized: Record<string, number>; // keys: "janus_coint", "charm_coint", ...
+    margin: Record<string, number>;
+  };
+  return: {
+    realized: Record<string, number>;
+    margin: Record<string, number>;
+  };
+};
+
 export type PerformanceMetricsPayload = {
   meta: MetaBlock;
   accounts: string[];
@@ -126,6 +137,8 @@ export type PerformanceMetricsPayload = {
 
   /** live unrealized snapshot */
   uPnl: UPnLBlock;
+
+  combined_coint_strategy: CombinedCointStrategy;
 };
 
 /* ---------- Live status & contexts ---------- */
