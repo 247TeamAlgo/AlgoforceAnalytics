@@ -380,7 +380,7 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
 
     # ---------------- Strategy rollups (Janus/Charm) ----------------
     janus_accs = [a for a in accs if a.lower() in {"fund2"}]
-    charm_accs = [a for a in accs if a.lower() in {"fund3"}]
+    adem_accs = [a for a in accs if a.lower() in {"fund3"}]
 
     def _subset_up(up_full: dict[str, float], subset: list[str]) -> dict[str, float]:
         sub = {a: float(up_full.get(a, 0.0)) for a in subset}
@@ -434,7 +434,7 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
         return dd_realized, dd_margin, ret_realized, ret_margin
 
     janus_dd_r, janus_dd_m, janus_ret_r, janus_ret_m = _strategy_metrics(janus_accs)
-    charm_dd_r, charm_dd_m, charm_ret_r, charm_ret_m = _strategy_metrics(charm_accs)
+    adem_dd_r, adem_dd_m, adem_ret_r, adem_ret_m = _strategy_metrics(adem_accs)
 
     payload: dict[str, object] = {
         "meta": {
@@ -476,21 +476,21 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
             "drawdown": {
                 "realized": {
                     "janus_coint": janus_dd_r,
-                    "charm_coint": charm_dd_r,
+                    "adem_coint": adem_dd_r,
                 },
                 "margin": {
                     "janus_coint": janus_dd_m,
-                    "charm_coint": charm_dd_m,
+                    "adem_coint": adem_dd_m,
                 },
             },
             "return": {
                 "realized": {
                     "janus_coint": janus_ret_r,
-                    "charm_coint": charm_ret_r,
+                    "adem_coint": adem_ret_r,
                 },
                 "margin": {
                     "janus_coint": janus_ret_m,
-                    "charm_coint": charm_ret_m,
+                    "adem_coint": adem_ret_m,
                 },
             },
         },

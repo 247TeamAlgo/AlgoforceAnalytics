@@ -59,12 +59,12 @@ export default function CombinedPerformanceStratMTDCard({
     realizedRet: Number(cs?.return?.realized?.janus_coint ?? 0),
     marginRet: Number(cs?.return?.margin?.janus_coint ?? 0),
   };
-  const charm = {
+  const adem = {
     accounts: ["fund3"],
-    realizedDD: Number(cs?.drawdown?.realized?.charm_coint ?? 0),
-    marginDD: Number(cs?.drawdown?.margin?.charm_coint ?? 0),
-    realizedRet: Number(cs?.return?.realized?.charm_coint ?? 0),
-    marginRet: Number(cs?.return?.margin?.charm_coint ?? 0),
+    realizedDD: Number(cs?.drawdown?.realized?.adem_coint ?? 0),
+    marginDD: Number(cs?.drawdown?.margin?.adem_coint ?? 0),
+    realizedRet: Number(cs?.return?.realized?.adem_coint ?? 0),
+    marginRet: Number(cs?.return?.margin?.adem_coint ?? 0),
   };
 
   // responsive sizes (match charts)
@@ -149,15 +149,15 @@ export default function CombinedPerformanceStratMTDCard({
           {/* Charm */}
           <div>
             <div className="text-center text-sm font-medium mb-1">
-              Charm Coint
+              Adem Coint
             </div>
             <DrawdownChart
               title={null}
               realizedLabel={false}
               marginLabel={false}
-              realizedDD={charm.realizedDD}
-              marginDD={charm.marginDD}
-              selectedAccounts={charm.accounts}
+              realizedDD={adem.realizedDD}
+              marginDD={adem.marginDD}
+              selectedAccounts={adem.accounts}
               barHeight={barHeight}
               rowGap={rowGap}
               barColumnPadX={barColumnPadX}
@@ -207,17 +207,17 @@ export default function CombinedPerformanceStratMTDCard({
           {/* Charm */}
           <div>
             <div className="text-center text-sm font-medium mb-1">
-              Charm Coint
+              Adem Coint
             </div>
             <ReturnChart
               title={null}
               realizedLabel={false}
               marginLabel={false}
-              realizedReturn={charm.realizedRet}
-              marginReturn={charm.marginRet}
-              selectedAccounts={charm.accounts}
+              realizedReturn={adem.realizedRet}
+              marginReturn={adem.marginRet}
+              selectedAccounts={adem.accounts}
               containerWidth={wrapW}
-              upnlReturn={charm.marginRet - charm.realizedRet}
+              upnlReturn={adem.marginRet - adem.realizedRet}
               barHeight={barHeight}
               rowGap={rowGap}
               barColumnPadX={barColumnPadX}
