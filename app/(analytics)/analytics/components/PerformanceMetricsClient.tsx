@@ -5,6 +5,7 @@ import { ChevronDown } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import CombinedPerformanceMTDCard from "./performance-metrics/combined-performance-metrics/CombinedPerformanceMTDCard";
+import CombinedPerformanceStratMTDCard from "./performance-metrics/combined-performance-metrics/CombinedPerformanceStratMTDCard";
 import type {
   BulkMetricsResponse,
   DateToRow,
@@ -263,16 +264,23 @@ export default function PerformanceMetricClient({
               selected={accounts}
               combinedUpnl={payload?.uPnl?.combined ?? 0}
             />
-            <NetPnlList
-              rows={symbolRows}
-              selectedAccounts={accounts}
-              symbolBreakdownMap={payload?.symbolPnlMTD?.symbols}
+            <CombinedPerformanceStratMTDCard
+              bulk={combinedBulk}
+              selected={accounts}
+              combinedUpnl={payload?.uPnl?.combined ?? 0}
             />
           </div>
 
-          {/* Max Drawdown */}
-          <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
-            <RegularReturnsBarGraph />
+          <div className="space-y-4">
+            <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
+              {/* Regular Returns */}
+              <RegularReturnsBarGraph />
+              <NetPnlList
+                rows={symbolRows}
+                selectedAccounts={accounts}
+                symbolBreakdownMap={payload?.symbolPnlMTD?.symbols}
+              />
+            </div>
           </div>
 
           {/* Developer’s Tool */}

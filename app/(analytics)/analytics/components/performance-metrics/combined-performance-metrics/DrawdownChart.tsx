@@ -20,14 +20,18 @@ type RowSpec = { label: string; color: string; value: number };
 type Tick = { v: number; label: string; i?: number };
 
 export type DrawdownChartProps = {
+  /** Title above the chart; pass null to hide */
+  title?: string | null;
+
+  /** Show/hide the left row labels inside the chart */
+  realizedLabel?: boolean;
+  marginLabel?: boolean;
+
   realizedDD: number;
   marginDD: number;
 
-  /** Per-account breakdowns for realized and margin drawdown (fractions). */
   realizedBreakdown?: Record<string, number>;
   marginBreakdown?: Record<string, number>;
-
-  /** Selected accounts; order is preserved in tooltips. */
   selectedAccounts?: string[];
 
   levels?: Level[];
@@ -47,7 +51,6 @@ function clamp01(x: number): number {
   if (Number.isNaN(x)) return 0;
   return Math.max(0, Math.min(1, x));
 }
-
 function hClass(px: number): string {
   if (px <= 18) return "h-[18px]";
   if (px <= 20) return "h-5";
@@ -66,6 +69,9 @@ function rowGapClass(px: number): string {
 }
 
 export default function DrawdownChart({
+  title = "Drawdown",
+  realizedLabel = true,
+  marginLabel = true,
   realizedDD,
   marginDD,
   realizedBreakdown,
@@ -149,9 +155,6 @@ export default function DrawdownChart({
     return c;
   };
 
-  const realizedFill = resolveFill(Math.abs(realizedDD), REALIZED_COLOR);
-  const marginFill = resolveFill(Math.abs(marginDD), MARGIN_COLOR);
-
   const normalizeEntries = (
     map?: Record<string, number>,
     selected?: string[]
@@ -220,10 +223,12 @@ export default function DrawdownChart({
   };
 
   return (
-    <div className="rounded-xl border bg-card/40 p-4 sm:p-5">
-      <div className="mb-2 text-sm sm:text-base font-medium text-foreground">
-        Drawdown
-      </div>
+    <div className="rounded-lg border bg-card/40 p-3 sm:p-4">
+      {title ? (
+        <div className="mb-2 text-sm sm:text-base font-medium text-foreground">
+          {title}
+        </div>
+      ) : null}
 
       <div
         className={["grid", GRID_COLS_CLS, COL_GAP_CLS, ROW_GAP_CLS].join(" ")}
@@ -253,7 +258,7 @@ export default function DrawdownChart({
 
         {/* Realized row */}
         <div className="text-sm text-foreground flex items-center">
-          Realized
+          {realizedLabel ? "Realized" : null}
         </div>
         <TooltipProvider delayDuration={100}>
           <Tooltip>
@@ -264,7 +269,7 @@ export default function DrawdownChart({
                   color: REALIZED_COLOR,
                   value: realizedDD,
                 })}
-                {/* shared dashed guides overlay */}
+                {/* dashed guides overlay */}
                 <div
                   className="pointer-events-none absolute z-[15]"
                   style={{
@@ -310,10 +315,6 @@ export default function DrawdownChart({
                     <span className={valueColorClass(v)}>{pct4(v)}</span>
                   </React.Fragment>
                 ))}
-                {/* <span className="text-muted-foreground">total</span>
-                <span className="font-medium" style={{ color: realizedFill }}>
-                  {pct4(realizedDD)}
-                </span> */}
               </div>
             </TooltipContent>
           </Tooltip>
@@ -328,7 +329,9 @@ export default function DrawdownChart({
         </div>
 
         {/* Margin row */}
-        <div className="text-sm text-foreground flex items-center">Margin</div>
+        <div className="text-sm text-foreground flex items-center">
+          {marginLabel ? "Margin" : null}
+        </div>
         <TooltipProvider delayDuration={100}>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -377,10 +380,6 @@ export default function DrawdownChart({
                     <span className={valueColorClass(v)}>{pct4(v)}</span>
                   </React.Fragment>
                 ))}
-                {/* <span className="text-muted-foreground">total</span>
-                <span className="font-medium" style={{ color: marginFill }}>
-                  {pct4(marginDD)}
-                </span> */}
               </div>
             </TooltipContent>
           </Tooltip>

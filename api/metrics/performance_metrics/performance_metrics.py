@@ -1,5 +1,13 @@
 # api/metrics/performance_metrics/performance_metrics.py
-"""Top-level helpers to build performance metrics payloads for the API."""
+"""Top-level helpers to build performance metrics payloads for the API.
+
+Changes:
+- Reflect UPnL (from up_map) into the MTD realized percent by injecting per-account
+  UPnL into the last row of the realized equity series before computing mtd_return.
+- Expose both realized MTD% variants:
+    * mtd_ret_realized_pure:     realized-only (no UPnL)
+    * mtd_ret_realized_with_upnl: realized + last-row UPnL injection (used in payload)
+"""
 
 from __future__ import annotations
 
@@ -7,6 +15,7 @@ from collections.abc import Sequence
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+from pandas import DataFrame
 
 from ...core.config import now_utc_iso
 from ...db.baseline import read_unrealized_json
@@ -26,19 +35,26 @@ from .calculations.returns import (
 
 
 def _mtd_window_today() -> tuple[pd.Timestamp, pd.Timestamp, pd.Timestamp]:
-    """Return (start_of_month_local, now_local_floored_to_hour, yesterday_local_normalized).
+    """Return (start_of_month_local@00:00, today_local@00:00, yesterday_local@00:00).
 
-    Anchored to Europe/Zurich. Returned timestamps are naive (tz removed) but
-    aligned to local time to match the CLI's intraday, hourly-anchored behavior.
+    Europe/Zurich anchored. Returns tz-naive timestamps that preserve local wall times.
     """
     tz = ZoneInfo("Europe/Zurich")
-    now_local = pd.Timestamp.now(tz=tz).floor("h")
-    start_local = now_local.normalize().replace(day=1)
-    yesterday_local = now_local.normalize() - pd.Timedelta(days=1)
+
+    # Keep today's DATE, force TIME to 00:00:00 (tz-aware)
+    now_local = pd.Timestamp.now(tz=tz).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # First of this month, TIME 00:00:00 (tz-aware). Date remains the 1st.
+    start_local = now_local.replace(day=1)
+
+    # Yesterday at 00:00:00 (tz-aware)
+    yesterday_local = now_local - pd.Timedelta(days=1)
+
+    # Make tz-naive WITHOUT changing wall times
     return (
-        start_local.tz_convert(None),
-        now_local.tz_convert(None),
-        yesterday_local.tz_convert(None),
+        start_local.tz_localize(None),
+        now_local.tz_localize(None),
+        yesterday_local.tz_localize(None),
     )
 
 
@@ -107,6 +123,25 @@ def _offset_fixed_with_initial(
         if a in fixed.columns:
             fixed[a] = fixed[a] + float(init_map.get(a, 0.0))
     return fixed
+
+
+def _inject_upnl_last_row(
+    levels: DataFrame, up_map: dict[str, float], accounts: list[str]
+) -> DataFrame:
+    """Return a copy of `levels` where each account's last row is incremented by its UPnL.
+
+    This mirrors the behavior often used in dashboards where UPnL is applied
+    only on the latest point to express a 'live' end-of-period equity.
+    """
+    if levels.empty:
+        return levels
+    out = levels.copy()
+    last = out.index[-1]
+    for a in accounts:
+        if a in out.columns:
+            base = _float_scalar(out.at[last, a])
+            out.at[last, a] = base + float(up_map.get(a, 0.0))
+    return out
 
 
 def _live_returns_block(
@@ -249,12 +284,15 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
     """Return the full metrics payload for requested accounts.
 
     Alignment with CLI:
-    - Window runs MTD up to *now* (Europe/Zurich), floored to hour.
+    - Window runs MTD up to *today@00:00* (Europe/Zurich).
     - Current DD uses realized+UPNL vs realized peak; margin uses margin levels.
     - Max DD is computed from *levels* (not returns) over the MTD window.
+    - mtd_ret_realized now reflects *last-row UPnL injection* per account.
     """
     accs = [a.strip().lower() for a in accounts if a.strip()]
     start_day, today, _yesterday = _mtd_window_today()
+    print(f"start_day = {start_day}")
+    print(f"today = {today}")
 
     # Initial balances (SQL only)
     init_map: dict[str, float] = {}
@@ -265,24 +303,38 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
         if bal == 0.0:
             zero_initial.append(a)
 
-    # Realized equity (SQL deltas + SQL initial), hourly through NOW
+    # Realized equity (SQL deltas + SQL initial), daily through today
     fixed_delta, _ = build_fixed_balances(accs, start_day, today)
     fixed = _offset_fixed_with_initial(fixed_delta, init_map, accs)
 
     # Baselines and UPnL
-    up_map = read_upnl(accs)
-    unreal_map = read_unrealized_json()
+    up_map = read_upnl(accs)  # {acc: upnl, ..., "total": ...}
+    unreal_map = read_unrealized_json()  # {acc: unrealized_json_baseline, ...}
 
     # Margin equity (shift by unrealized.json across the index + inject UPNL on the last row)
     margin = build_margin_series(fixed, unreal_map, up_map, accs)
 
-    # Returns blocks (MTD series-based) — series-level MTD% using levels
-    fixed_total = fixed.assign(total=fixed[accs].sum(axis=1)) if not fixed.empty else fixed
+    # ----- Realized MTD returns -----
+    # 1) Pure realized (no UPnL)
+    fixed_total_pure = fixed.assign(total=fixed[accs].sum(axis=1)) if not fixed.empty else fixed
+    mtd_ret_realized_pure = mtd_return(fixed_total_pure) if not fixed_total_pure.empty else {}
+
+    # 2) With UPnL injected on last row per account
+    fixed_with_up = _inject_upnl_last_row(fixed, up_map, accs)
+    fixed_total_with_up = (
+        fixed_with_up.assign(total=fixed_with_up[accs].sum(axis=1))
+        if not fixed_with_up.empty
+        else fixed_with_up
+    )
+    mtd_ret_realized_with_upnl = (
+        mtd_return(fixed_total_with_up) if not fixed_total_with_up.empty else {}
+    )
+
+    # Margin MTD returns (unchanged; already includes unrealized baseline + last-row UPnL)
     margin_total = margin.assign(total=margin[accs].sum(axis=1)) if not margin.empty else margin
-    mtd_ret_realized = mtd_return(fixed_total) if not fixed_total.empty else {}
     mtd_ret_margin = mtd_return(margin_total) if not margin_total.empty else {}
 
-    # Live returns (per CLI)
+    # Live returns (per CLI, realized and margin)
     (
         realized_usd,
         realized_pct,
@@ -296,17 +348,19 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
 
     # Drawdowns (current + MTD max from *levels*)
     current_dd_realized, current_dd_margin = _current_dd_block(accs, fixed, margin, up_map)
-    mdd_fixed = mtd_max_dd_from_levels(fixed_total) if not fixed_total.empty else {}
+    mdd_fixed = mtd_max_dd_from_levels(fixed_total_pure) if not fixed_total_pure.empty else {}
     mdd_margin = mtd_max_dd_from_levels(margin_total) if not margin_total.empty else {}
 
     # Losing days (exclude today; combined loss by sum-of-PnL rule)
     losing = losing_days_mtd(accs, day_start_hour=8)
 
-    # PnL per symbol (realized only)
+    # PnL per symbol (realized only) — window uses [start_day, today]
     symbols, totals_by_acc = pnl_by_symbol_mtd(accs, str(start_day.date()), str(today.date()))
 
     # Serialize equity blocks
-    realized_series = _serialize_series(fixed_total, accs) if not fixed_total.empty else {}
+    realized_series = (
+        _serialize_series(fixed_total_pure, accs) if not fixed_total_pure.empty else {}
+    )
     margin_series = _serialize_series(margin_total, accs) if not margin_total.empty else {}
     live_key = str(list(margin_total.index)[-1]) if not margin_total.empty else None
     margin_live = {live_key: margin_series[live_key]} if live_key else {}
@@ -322,9 +376,6 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
             sum(init_map.get(a, 0.0) for a in accs) + sum(unreal_map.get(a, 0.0) for a in accs)
         ),
     }
-
-    # print(f"mtd_ret_realized = {mtd_ret_realized}")
-    # print(f"realized_pct = {realized_pct}")
 
     payload: dict[str, object] = {
         "meta": {
@@ -348,8 +399,12 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
             "margin": {"series": margin_series, "live": margin_live},
         },
         "returns": {
-            # "realized": {"percent": {**mtd_ret_realized, **realized_pct}, "dollars": realized_usd},
-            "realized": {"percent": {**mtd_ret_realized}, "dollars": realized_usd},
+            # Realized: expose both; use "percent" as WITH-UPnL to reflect live MTD
+            "realized": {
+                "percent": {**mtd_ret_realized_with_upnl},
+                "percentPure": {**mtd_ret_realized_pure},
+                "dollars": realized_usd,
+            },
             "margin": {"percent": {**mtd_ret_margin, **margin_pct}, "dollars": margin_usd},
         },
         "drawdown": {

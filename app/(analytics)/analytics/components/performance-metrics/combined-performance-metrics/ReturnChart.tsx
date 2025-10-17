@@ -14,6 +14,13 @@ import {
 type Row = { label: "Realized" | "Margin"; value: number };
 
 type Props = {
+  /** Title above the chart; pass null to hide */
+  title?: string | null;
+
+  /** Show/hide the left row labels inside the chart */
+  realizedLabel?: boolean;
+  marginLabel?: boolean;
+
   realizedReturn: number;
   marginReturn: number;
   realizedBreakdown?: Record<string, number>;
@@ -30,13 +37,15 @@ function pct4(n: number): string {
   return `${(n * 100).toFixed(4)}%`;
 }
 
-/* Fixed colors: positive → green (emerald-500), negative → red (red-500) */
 const POS_COLOR = "hsl(142 72% 45%)";
 const NEG_COLOR = "hsl(0 72% 51%)";
 const barColorFor = (value: number): string =>
   value >= 0 ? POS_COLOR : NEG_COLOR;
 
 export function ReturnChart({
+  title = "Return",
+  realizedLabel = true,
+  marginLabel = true,
   realizedReturn,
   marginReturn,
   realizedBreakdown,
@@ -234,14 +243,16 @@ export function ReturnChart({
   };
 
   return (
-    <div className="rounded-xl border bg-card/40 p-4 sm:p-5">
-      <div className="mb-2 text-sm sm:text-base font-medium text-foreground">
-        Return
-      </div>
+    <div className="rounded-lg border bg-card/40 p-3 sm:p-4">
+      {title ? (
+        <div className="mb-2 text-sm sm:text-base font-medium text-foreground">
+          {title}
+        </div>
+      ) : null}
 
       <div
         className="grid"
-        style={{ gridTemplateColumns: "auto 1fr auto", columnGap: 10 }}
+        style={{ gridTemplateColumns: "auto 1fr auto", columnGap: 8 }}
       >
         {/* labels column */}
         <div
@@ -249,10 +260,10 @@ export function ReturnChart({
           style={{ height: STACK_H }}
         >
           <div className="text-sm text-foreground flex items-center">
-            Realized
+            {realizedLabel ? "Realized" : null}
           </div>
           <div className="text-sm text-foreground flex items-center">
-            Margin
+            {marginLabel ? "Margin" : null}
           </div>
         </div>
 
@@ -291,7 +302,6 @@ export function ReturnChart({
 
           {/* tooltips overlay */}
           <TooltipProvider delayDuration={100}>
-            {/* Realized tooltip */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <div
@@ -313,18 +323,10 @@ export function ReturnChart({
                       <span className={valueColorClass(v)}>{pct4(v)}</span>
                     </React.Fragment>
                   ))}
-                  {/* <span className="text-muted-foreground">total</span>
-                  <span
-                    className="font-medium"
-                    style={{ color: barColorFor(rows[0]!.value) }}
-                  >
-                    {pct4(rows[0]!.value)}
-                  </span> */}
                 </div>
               </TooltipContent>
             </Tooltip>
 
-            {/* Margin tooltip */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <div
@@ -346,24 +348,6 @@ export function ReturnChart({
                       <span className={valueColorClass(v)}>{pct4(v)}</span>
                     </React.Fragment>
                   ))}
-                  {/* <span className="text-muted-foreground">total</span>
-                  <span
-                    className="font-medium"
-                    style={{ color: barColorFor(rows[1]!.value) }}
-                  >
-                    {pct4(rows[1]!.value)}
-                  </span> */}
-                  {/* {upnlReturn !== 0 && (
-                    <>
-                      <span className="text-muted-foreground">upnl</span>
-                      <span
-                        className="font-medium"
-                        style={{ color: METRICS_COLORS.upnl }}
-                      >
-                        {pct4(upnlReturn)}
-                      </span>
-                    </>
-                  )} */}
                 </div>
               </TooltipContent>
             </Tooltip>

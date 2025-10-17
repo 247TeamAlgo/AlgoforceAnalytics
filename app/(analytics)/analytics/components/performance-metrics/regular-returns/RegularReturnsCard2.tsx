@@ -10,7 +10,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ChevronDown } from "lucide-react";
-import { METRICS_COLORS } from "../combined-performance-metrics/helpers";
 
 /* ------------------------------- types -------------------------------- */
 type Range = "Daily" | "Weekly" | "Monthly";
@@ -286,13 +285,6 @@ export default function RegularReturnsCard2(): React.ReactNode {
     GUTTER_TOP = 10,
     GUTTER_BOTTOM = 44;
 
-  // Combined: simple average of displayed points
-  const combinedValue: number = useMemo(() => {
-    if (!displayed.length) return 0;
-    const s = displayed.reduce((acc, p) => acc + p.value, 0);
-    return s / displayed.length;
-  }, [displayed]);
-
   return (
     <Card className="py-0">
       <CardHeader className="border-b !p-0">
@@ -326,27 +318,6 @@ export default function RegularReturnsCard2(): React.ReactNode {
                 className="pointer-events-none absolute top-1/2 -translate-y-1/2 right-2 h-4 w-4 text-muted-foreground"
                 aria-hidden="true"
               />
-            </div>
-
-            {/* Combined chip — right after the dropdown */}
-            <div
-              className="flex items-center justify-between rounded-lg border bg-card px-3 py-2"
-              style={{
-                boxShadow: `inset 0 0 0 2px color-mix(in oklab, ${METRICS_COLORS.margin} 22%, transparent)`,
-              }}
-              title="Combined"
-            >
-              <div className="min-w-0">
-                <div className="truncate text-sm font-medium">Combined</div>
-              </div>
-              <div className="ml-3 flex items-center gap-2">
-                <span
-                  className="text-2xl font-bold leading-none tracking-tight tabular-nums"
-                  style={{ color: METRICS_COLORS.margin }}
-                >
-                  {pct2(combinedValue)}
-                </span>
-              </div>
             </div>
 
             {/* Date range (follows after chip) */}
