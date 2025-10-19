@@ -284,7 +284,10 @@ export default function PerformanceMetricClient({
           <div className="space-y-4">
             <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
               {/* Regular Returns */}
-              <RegularReturnsBarGraph />
+              <RegularReturnsBarGraph
+                accounts={accounts}
+                data={payload?.regular_returns ?? {}}
+              />
               <NetPnlList
                 rows={symbolRows}
                 selectedAccounts={accounts}

@@ -1,176 +1,97 @@
-// app/types.ts
-/* Shared types */
+// "@/components/prefs/types.ts"
 
-import { Dispatch, SetStateAction } from "react";
+export type Numeric = number;
 
-export type Dict<T> = Record<string, T>;
+/**
+ * A row keyed by account names and "total", each a dollar value.
+ * Example: { fund2: 125.42, fund3: -12.03, total: 113.39 }
+ */
+export type RegularReturnsRow = Record<string, Numeric>;
 
-export type AccountMeta = {
-  redisName: string;
-  display?: string | null;
-  monitored?: boolean;
-};
+/**
+ * Regular Returns payload:
+ * Keyed by session date label ("YYYY-MM-DD"), value is a RegularReturnsRow.
+ * Matches the backend "regular_returns" object in performance_metrics.py.
+ *
+ * Example:
+ * {
+ *   "2025-10-18": { fund2: 12.3, fund3: -1.1, total: 11.2 },
+ *   "2025-10-19": { fund2: 2.0,  fund3:  3.0, total:  5.0 }
+ * }
+ */
+export type RegularReturnsPayload = Record<string, RegularReturnsRow>;
 
-export type AnalyticsRange = {
-  start?: string;
-  end?: string;
-};
+/* ---------------------------------------------------------------------- */
+/* Existing types (abridged placeholders shown here for context)          */
+/* Keep your current definitions; only ensure PerformanceMetricsPayload    */
+/* is extended with the new field below.                                   */
+/* ---------------------------------------------------------------------- */
 
-/* ---------- Performance metrics payload (matches new backend) ---------- */
+export type EquitySeries = Record<string, Record<string, number>>;
 
-export type MetaWindow = {
-  mode: "MTD";
-  startDay: string;
-  endDay: string;
-};
+export interface PerformanceMetricsWindow {
+  mode: "MTD" | "WTD" | "Custom";
+  startDay: string; // "YYYY-MM-DD"
+  endDay: string; // "YYYY-MM-DD"
+}
 
-export type MetaFlags = {
-  missingInitialBalanceAccounts?: string[];
-  zeroInitialBalanceAccounts?: string[];
-};
-
-export type MetaBlock = {
+export interface PerformanceMetricsMeta {
   asOf: string;
-  window: MetaWindow;
-  flags?: MetaFlags;
-};
-
-export type EquityRow = Dict<number>; // { fund2: 123, fund3: 456, total: 579 }
-export type EquitySeries = Dict<EquityRow>; // { "YYYY-MM-DD": EquityRow }
-
-export type EquityBlock = {
-  realized: { series: EquitySeries };
-  margin: {
-    series: EquitySeries;
-    /** last timestamp only with UPnL injected */
-    live: EquitySeries;
+  window: PerformanceMetricsWindow;
+  flags?: {
+    missingInitialBalanceAccounts?: string[];
+    zeroInitialBalanceAccounts?: string[];
   };
-};
+}
 
-export type ReturnBlock = {
-  /** fractional returns, e.g. 0.0123 for +1.23% */
-  percent: Dict<number>; // per account + total
-  /** absolute dollar P/L since month-open */
-  dollars: Dict<number>; // per account + total
-};
-
-export type ReturnsBlock = {
-  realized: ReturnBlock;
-  margin: ReturnBlock;
-};
-
-export type DrawdownSide = {
-  /** current drawdown vs MTD peak (fractional) per account + total */
-  current: Dict<number>;
-  /** max drawdown over MTD (fractional) per account + total */
-  max: Dict<number>;
-};
-
-export type DrawdownBlock = {
-  realized: DrawdownSide;
-  margin: DrawdownSide;
-};
-
-export type LosingStreak = {
-  consecutive: number;
-  /** { "YYYY-MM-DD": dailyPnL } for the tail of the streak */
-  days: Dict<number>;
-};
-
-export type LosingDaysBlock = {
-  perAccount: Dict<LosingStreak>;
-  combined: LosingStreak; // computed from summed daily PnL across accounts
-};
-
-export type SymbolRow = Dict<number> & { TOTAL: number }; // { fund2, fund3, TOTAL }
-export type SymbolTable = Dict<SymbolRow>;
-
-export type SymbolPnlBlock = {
-  symbols: SymbolTable;
-  totalPerAccount: Dict<number>;
-};
-
-export type UPnLBlock = {
-  asOf: string;
-  perAccount: Dict<number>;
-  combined: number;
-};
-
-export type CombinedCointStrategy = {
-  drawdown: {
-    realized: Record<string, number>; // keys: "janus_coint", "charm_coint", ...
-    margin: Record<string, number>;
-  };
-  return: {
-    realized: Record<string, number>;
-    margin: Record<string, number>;
-  };
-};
-
-export type PerformanceMetricsPayload = {
-  meta: MetaBlock;
+export interface PerformanceMetricsPayload {
+  meta: PerformanceMetricsMeta;
   accounts: string[];
 
-  /** SQL month-open anchors (per account + total) */
-  initialBalances: Dict<number>;
+  initialBalances?: Record<string, number>;
+  unrealizedJson?: Record<string, number>;
+  initialBalancesWithUnrealized?: Record<string, number>;
 
-  /** per-account unrealized shift from baseline file (used for margin view) */
-  unrealizedJson: Dict<number>;
+  equity?: {
+    realized?: { series?: EquitySeries; live?: Record<string, number> };
+    margin?: { series?: EquitySeries; live?: Record<string, number> };
+  };
 
-  /** convenience: initialBalances + unrealizedJson (per account + total) */
-  initialBalancesWithUnrealized: Dict<number>;
+  returns?: {
+    realized?: {
+      percent?: Record<string, number>;
+      percentPure?: Record<string, number>;
+      dollars?: Record<string, number>;
+    };
+    margin?: {
+      percent?: Record<string, number>;
+      dollars?: Record<string, number>;
+    };
+  };
 
-  /** equity time series */
-  equity: EquityBlock;
+  drawdown?: {
+    realized?: {
+      current?: Record<string, number>;
+      max?: Record<string, number>;
+    };
+    margin?: { current?: Record<string, number>; max?: Record<string, number> };
+  };
 
-  /** MTD returns (fraction + dollars) */
-  returns: ReturnsBlock;
+  losingDays?: unknown;
+  symbolPnlMTD?: {
+    symbols?: Record<string, Record<string, number>>;
+    totalPerAccount?: Record<string, number>;
+  };
+  uPnl?: {
+    combined?: number;
+    perAccount?: Record<string, number>;
+  };
+  combined_coint_strategy?: unknown;
 
-  /** MTD drawdowns */
-  drawdown: DrawdownBlock;
-
-  /** losing streaks (exclude today) */
-  losingDays: LosingDaysBlock;
-
-  /** MTD realized PnL by symbol */
-  symbolPnlMTD: SymbolPnlBlock;
-
-  /** live unrealized snapshot */
-  uPnl: UPnLBlock;
-
-  combined_coint_strategy: CombinedCointStrategy;
-};
-
-/* ---------- Live status & contexts ---------- */
-
-export type LiveStatus = "green" | "yellow" | "red" | "unknown";
-
-/* Accounts slice */
-export type AccountsContextValue = {
-  navbarVisible: boolean;
-
-  analyticsAccounts: AccountMeta[];
-  analyticsSelectedAccounts: string[];
-  setAnalyticsSelectedAccounts: Dispatch<SetStateAction<string[]>>;
-  analyticsLoading: boolean;
-  reloadAccounts: () => Promise<void>;
-
-  analyticsRange: AnalyticsRange;
-  setAnalyticsRange: Dispatch<SetStateAction<AnalyticsRange>>;
-  analyticsEarliest: boolean;
-  setAnalyticsEarliest: Dispatch<SetStateAction<boolean>>;
-};
-
-/* Performance metrics slice */
-export type PerformanceMetricsContextValue = {
-  performanceMetrics: PerformanceMetricsPayload | null;
-  performanceLoading: boolean;
-  performanceError: string | null;
-  /** server timestamp from API (derived from payload) */
-  performanceAsOf?: string;
-  /** client timestamp of last successful fetch */
-  performanceFetchedAt?: string;
-  /** derived from asOf vs fetchedAt */
-  performanceStatus: LiveStatus;
-  refreshPerformance: () => Promise<void>;
-};
+  /**
+   * NEW: regular session-based returns (08:00 → 07:59), per-day map.
+   * Keys: "YYYY-MM-DD" (session label dates).
+   * Values: per-account dollars plus "total".
+   */
+  regular_returns?: RegularReturnsPayload;
+}

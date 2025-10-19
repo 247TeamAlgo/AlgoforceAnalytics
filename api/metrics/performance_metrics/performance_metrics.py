@@ -25,6 +25,7 @@ from .calculations.drawdown import mtd_max_dd_from_levels
 from .calculations.equity import build_fixed_balances, build_margin_series
 from .calculations.losing_days import losing_days_mtd
 from .calculations.pnl_by_symbol import pnl_by_symbol_mtd
+from .calculations.regular_returns import regular_returns_by_session
 from .calculations.returns import (
     live_return_margin,
     live_return_realized,
@@ -421,8 +422,17 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
         ret_realized = float(ret_realized_map.get("total", 0.0))
         ret_margin = float(ret_margin_map.get("total", 0.0))
 
+        # mdd_realized_map = (
+        #     mtd_max_dd_from_levels(fixed_total_pure_sub) if not fixed_total_pure_sub.empty else {}
+        # )
+        # Change to compute the realized MDD from the with-UPnL-on-last-row series
+        levels_for_mdd_realized = (
+            fixed_total_with_up_sub if not fixed_total_with_up_sub.empty else fixed_total_pure_sub
+        )
         mdd_realized_map = (
-            mtd_max_dd_from_levels(fixed_total_pure_sub) if not fixed_total_pure_sub.empty else {}
+            mtd_max_dd_from_levels(levels_for_mdd_realized)
+            if not levels_for_mdd_realized.empty
+            else {}
         )
         mdd_margin_map = (
             mtd_max_dd_from_levels(margin_total_sub) if not margin_total_sub.empty else {}
@@ -435,6 +445,12 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
 
     janus_dd_r, janus_dd_m, janus_ret_r, janus_ret_m = _strategy_metrics(janus_accs)
     adem_dd_r, adem_dd_m, adem_ret_r, adem_ret_m = _strategy_metrics(adem_accs)
+
+    # ---------------- Regular Returns for all accounts ----------------
+    regular_df = regular_returns_by_session(
+        accs, start_day, today, day_start_hour=8, tz="Europe/Zurich"
+    )
+    regular_returns = _serialize_series(regular_df, accs) if not regular_df.empty else {}
 
     payload: dict[str, object] = {
         "meta": {
@@ -494,5 +510,6 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
                 },
             },
         },
+        "regular_returns": regular_returns,
     }
     return payload
