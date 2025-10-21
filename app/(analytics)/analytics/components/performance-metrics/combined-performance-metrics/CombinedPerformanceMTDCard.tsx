@@ -171,7 +171,7 @@ export default function CombinedPerformanceMTDCard({
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 px-6 pt-2 sm:py-3 grid grid-rows-[auto_auto_auto] gap-2">
             <CardTitle className="leading-tight">
-              Combined Performance
+              Month-to-Date Performance
             </CardTitle>
             <CardDescription className="text-sm leading-snug">
               {windowLabel}

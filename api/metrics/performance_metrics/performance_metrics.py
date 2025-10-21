@@ -414,8 +414,14 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
             else margin_sub
         )
 
+        # ret_realized_map = (
+        #     mtd_return(fixed_total_with_up_sub) if not fixed_total_with_up_sub.empty else {}
+        # )
+        levels_for_ret_realized = (
+            fixed_total_with_up_sub if not fixed_total_with_up_sub.empty else fixed_total_pure_sub
+        )
         ret_realized_map = (
-            mtd_return(fixed_total_with_up_sub) if not fixed_total_with_up_sub.empty else {}
+            mtd_return(levels_for_ret_realized) if not levels_for_ret_realized.empty else {}
         )
         ret_margin_map = mtd_return(margin_total_sub) if not margin_total_sub.empty else {}
 
@@ -434,6 +440,7 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
             if not levels_for_mdd_realized.empty
             else {}
         )
+
         mdd_margin_map = (
             mtd_max_dd_from_levels(margin_total_sub) if not margin_total_sub.empty else {}
         )

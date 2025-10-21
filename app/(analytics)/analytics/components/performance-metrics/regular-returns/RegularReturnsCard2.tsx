@@ -23,10 +23,10 @@ type Props = {
 };
 
 type Point = {
-  key: string; // e.g. "2025-10-19 08:00"
-  labelDate: Date; // session label date (local)
-  total: number; // height driver
-  per: Record<string, number>; // per-account dollars on that session
+  key: string;
+  labelDate: Date;
+  total: number;
+  per: Record<string, number>;
 };
 
 const CUT_HOUR = 8;
@@ -70,7 +70,6 @@ function sessionKey(dateOnly: Date): string {
 }
 
 /* ------------------------------ formatting ------------------------------ */
-/** Force a plain "$" symbol regardless of user locale showing "US$". */
 function usd(n: number): string {
   const v = Number.isFinite(n) ? n : 0;
   const abs = Math.abs(v);
@@ -360,9 +359,27 @@ export default function RegularReturnsCard2({
                   }}
                 >
                   {/* Zero line */}
-                  <div className="absolute inset-x-0 top-1/2 border-t border-border/60" />
+                  <div className="absolute inset-x-0 top-1/2 border-t-2 border-border/80" />
 
-                  {/* Bars */}
+                  {/* NEW: horizontal ticks at ±25/50/75% (quite visible) */}
+                  {([0.25, 0.5, 0.75] as const).map((f) => (
+                    <React.Fragment key={`ht-${f}`}>
+                      {/* +f */}
+                      <div
+                        className="absolute inset-x-0 border-t border-dashed border-border/70"
+                        style={{ top: `${50 - f * 50}%` }}
+                        aria-hidden
+                      />
+                      {/* -f */}
+                      <div
+                        className="absolute inset-x-0 border-t border-dashed border-border/70"
+                        style={{ top: `${50 + f * 50}%` }}
+                        aria-hidden
+                      />
+                    </React.Fragment>
+                  ))}
+
+                  {/* Bars (CHANGED: square corners, no rounding) */}
                   <div
                     className="relative h-full grid items-end gap-[4px]"
                     style={{
@@ -395,7 +412,7 @@ export default function RegularReturnsCard2({
                                 aria-label={`${usd(p.total)} • ${lbl} (8:00 cut)`}
                               >
                                 <div
-                                  className="w-full rounded-sm"
+                                  className="w-full" // no rounded corners
                                   style={{
                                     height: "100%",
                                     background: color,
@@ -414,7 +431,6 @@ export default function RegularReturnsCard2({
                             <div className="text-muted-foreground mb-1">
                               {lbl} (8:00 cut)
                             </div>
-                            {/* Per-account breakdown */}
                             <div className="grid grid-cols-1 gap-0.5">
                               {accounts.map((a) => (
                                 <div
@@ -441,6 +457,32 @@ export default function RegularReturnsCard2({
                             </div>
                           </TooltipContent>
                         </Tooltip>
+                      );
+                    })}
+                  </div>
+
+                  {/* NEW: vertical ticks aligned to shown X labels */}
+                  <div
+                    className="pointer-events-none absolute inset-0"
+                    aria-hidden
+                  >
+                    {displayed.map((p, i) => {
+                      const show = i % step === 0 || i === displayed.length - 1;
+                      if (!show) return null;
+                      const xPct = ((i + 0.5) / displayed.length) * 100;
+                      return (
+                        <div
+                          key={`vt-${p.key}`}
+                          className="absolute"
+                          style={{
+                            left: `${xPct}%`,
+                            bottom: 0,
+                            height: 10,
+                            width: 0,
+                            borderLeft: "2px solid var(--border)",
+                            transform: "translateX(-1px)",
+                          }}
+                        />
                       );
                     })}
                   </div>

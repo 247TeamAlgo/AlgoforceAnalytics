@@ -1,4 +1,4 @@
-// app/(analytics)/analytics/components/performance-metrics/combined-performance-metrics/DrawdownChart.tsx
+// app/(analytics)/analytics/components/performance-metrics/combined-performance-mrics/DrawdownChart.tsx
 "use client";
 
 import React, { CSSProperties, useMemo } from "react";
@@ -121,6 +121,14 @@ export default function DrawdownChart({
   const GRID_COLS_CLS = "grid-cols-[auto_1fr_auto]";
   const COL_GAP_CLS = "gap-x-2.5";
 
+  // === critical threshold ===
+  const CRITICAL = 0.035; // 3.5%
+  const EPS = 1e-12;
+  const ALERT_RED = "#ef4444";
+
+  const realizedBreach = realizedDD <= -CRITICAL;
+  const marginBreach = marginDD <= -CRITICAL;
+
   const ticks: Tick[] = [{ v: 0, label: "0%" }].concat(
     levels.map((l, i) => ({
       v: l.value,
@@ -153,6 +161,13 @@ export default function DrawdownChart({
       if (absVal >= levels[i]!.value) c = hot[i] ?? c;
     }
     return c;
+  };
+
+  // unified bar fill resolver so we can reuse for right labels
+  const barFillColor = (value: number, base: string): string => {
+    const absVal = Math.abs(value);
+    const baseFill = resolveFill(absVal, base);
+    return absVal + EPS >= CRITICAL ? ALERT_RED : baseFill;
   };
 
   const normalizeEntries = (
@@ -197,9 +212,8 @@ export default function DrawdownChart({
   );
 
   const renderRow = (r: RowSpec) => {
-    const absVal = Math.abs(r.value);
-    const widthPct = `${(absVal / maxAbs) * 100}%`;
-    const fillColor = resolveFill(absVal, r.color);
+    const widthPct = `${(Math.abs(r.value) / maxAbs) * 100}%`;
+    const fillColor = barFillColor(r.value, r.color);
 
     return (
       <>
@@ -222,6 +236,10 @@ export default function DrawdownChart({
     );
   };
 
+  // precompute bar colors for right labels
+  const realizedBarColor = barFillColor(realizedDD, REALIZED_COLOR);
+  const marginBarColor = barFillColor(marginDD, MARGIN_COLOR);
+
   return (
     <div className="rounded-lg border bg-card/40 p-3 sm:p-4">
       {title ? (
@@ -239,8 +257,12 @@ export default function DrawdownChart({
           className={["relative", AXIS_H_CLS, AXIS_MB_CLS, PAD_X_CLS].join(" ")}
         >
           {ticks.map((t, i) => {
-            const color =
-              typeof t.i === "number"
+            const lvlVal = typeof t.i === "number" ? levels[t.i]!.value : 0;
+            const isCriticalLabel =
+              typeof t.i === "number" && lvlVal + 1e-12 >= CRITICAL;
+            const color = isCriticalLabel
+              ? ALERT_RED
+              : typeof t.i === "number"
                 ? (hot[t.i] ?? METRICS_COLORS.guide)
                 : METRICS_COLORS.guide;
             return (
@@ -253,6 +275,13 @@ export default function DrawdownChart({
               </span>
             );
           })}
+          {/* -3.5% axis label always red */}
+          <span
+            className="absolute text-[11px] leading-none top-0"
+            style={{ ...tickLabelStyle(CRITICAL), color: ALERT_RED }}
+          >
+            -3.5%
+          </span>
         </div>
         <div />
 
@@ -288,17 +317,31 @@ export default function DrawdownChart({
                       borderRightWidth: 1,
                     }}
                   />
-                  {levels.map((l, i) => (
-                    <div
-                      key={`lvl-top-${i}`}
-                      className="absolute inset-y-0 border-r border-dashed opacity-90"
-                      style={{
-                        left: leftPct(l.value),
-                        borderColor: hot[i] ?? METRICS_COLORS.guide,
-                        borderRightWidth: 1,
-                      }}
-                    />
-                  ))}
+                  {levels.map((l, i) => {
+                    const color =
+                      l.value + 1e-12 >= CRITICAL
+                        ? ALERT_RED
+                        : (hot[i] ?? METRICS_COLORS.guide);
+                    return (
+                      <div
+                        key={`lvl-top-${i}`}
+                        className="absolute inset-y-0 border-r border-dashed opacity-90"
+                        style={{
+                          left: leftPct(l.value),
+                          borderColor: color,
+                          borderRightWidth: 1,
+                        }}
+                      />
+                    );
+                  })}
+                  <div
+                    className="absolute inset-y-0 border-r border-dashed opacity-90"
+                    style={{
+                      left: leftPct(CRITICAL),
+                      borderColor: ALERT_RED,
+                      borderRightWidth: 1,
+                    }}
+                  />
                 </div>
               </div>
             </TooltipTrigger>
@@ -319,11 +362,12 @@ export default function DrawdownChart({
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
+        {/* Right value label follows bar color */}
         <div
           className={[
-            "text-sm font-medium tabular-nums text-foreground flex items-center",
-            valueColorClass(realizedDD),
+            "text-sm font-medium tabular-nums flex items-center",
           ].join(" ")}
+          style={{ color: realizedBarColor }}
         >
           {pct4(realizedDD)}
         </div>
@@ -353,17 +397,31 @@ export default function DrawdownChart({
                       borderRightWidth: 1,
                     }}
                   />
-                  {levels.map((l, i) => (
-                    <div
-                      key={`lvl-bot-${i}`}
-                      className="absolute inset-y-0 border-r border-dashed opacity-90"
-                      style={{
-                        left: leftPct(l.value),
-                        borderColor: hot[i] ?? METRICS_COLORS.guide,
-                        borderRightWidth: 1,
-                      }}
-                    />
-                  ))}
+                  {levels.map((l, i) => {
+                    const color =
+                      l.value + 1e-12 >= CRITICAL
+                        ? ALERT_RED
+                        : (hot[i] ?? METRICS_COLORS.guide);
+                    return (
+                      <div
+                        key={`lvl-bot-${i}`}
+                        className="absolute inset-y-0 border-r border-dashed opacity-90"
+                        style={{
+                          left: leftPct(l.value),
+                          borderColor: color,
+                          borderRightWidth: 1,
+                        }}
+                      />
+                    );
+                  })}
+                  <div
+                    className="absolute inset-y-0 border-r border-dashed opacity-90"
+                    style={{
+                      left: leftPct(CRITICAL),
+                      borderColor: ALERT_RED,
+                      borderRightWidth: 1,
+                    }}
+                  />
                 </div>
               </div>
             </TooltipTrigger>
@@ -384,11 +442,12 @@ export default function DrawdownChart({
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
+        {/* Right value label follows bar color */}
         <div
           className={[
-            "text-sm font-medium tabular-nums text-foreground flex items-center",
-            valueColorClass(marginDD),
+            "text-sm font-medium tabular-nums flex items-center",
           ].join(" ")}
+          style={{ color: marginBarColor }}
         >
           {pct4(marginDD)}
         </div>

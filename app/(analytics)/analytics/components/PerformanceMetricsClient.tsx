@@ -1,4 +1,3 @@
-// app/(analytics)/analytics/components/PerformanceMetricsClient.tsx
 "use client";
 
 import { ChevronDown } from "lucide-react";
@@ -246,11 +245,16 @@ export default function PerformanceMetricClient({
 
   if (initialLoading) return <InitialLoadSkeleton />;
 
-  const maxDdRealizedTotal: number = Number(
-    payload?.drawdown?.realized?.max?.total ?? 0
+  // inside component (near other derived values)
+  const currentDdMarginTotal: number = Number(
+    payload?.drawdown?.margin?.current?.total ?? 0
   );
-  const maxDdRealizedMap: Record<string, number> | undefined =
-    payload?.drawdown?.realized?.max ?? undefined;
+  const currentDdMarginMap: Record<string, number> | undefined =
+    payload?.drawdown?.margin?.current ?? undefined;
+
+  const maxDdMarginTotalAbs: number = Math.abs(
+    Number(payload?.drawdown?.margin?.max?.total ?? 0)
+  );
 
   return (
     <div className="space-y-4">
@@ -358,9 +362,10 @@ export default function PerformanceMetricClient({
             variant="list"
           />
           <MaxDrawdownChart
-            realizedReturn={maxDdRealizedTotal}
-            realizedBreakdown={maxDdRealizedMap}
+            value={currentDdMarginTotal} // current margin DD (bar height)
+            breakdown={currentDdMarginMap} // (unused in tooltip now, but kept for compatibility)
             selectedAccounts={accounts}
+            maxRefAbs={maxDdMarginTotalAbs} // extra dashed line at MDD (abs)
           />
         </div>
       </div>

@@ -84,6 +84,8 @@ export default function CombinedPerformanceStratMTDCard({
   const rowGap = Math.round(barHeight * 0.55);
   const stackH = barHeight * 2 + rowGap;
   const barColumnPadX = 10;
+  const DD_AXIS_BAND_PX = 40;
+  const Return_AXIS_BAND_PX = 11;
 
   return (
     <Card className="py-0">
@@ -120,8 +122,12 @@ export default function CombinedPerformanceStratMTDCard({
               Drawdown
             </div>
             <div
-              className="flex flex-col justify-between"
-              style={{ height: stackH }}
+              className="grid grid-rows-2 items-center"
+              style={{
+                height: stackH, // same vertical span as the two bars + gap
+                marginTop: DD_AXIS_BAND_PX, // align with bars (accounts for axis band)
+                rowGap: `${rowGap}px`, // match spacing between bars
+              }}
             >
               <div className="text-sm text-foreground">Realized</div>
               <div className="text-sm text-foreground">Margin</div>
@@ -177,7 +183,11 @@ export default function CombinedPerformanceStratMTDCard({
             </div>
             <div
               className="flex flex-col justify-between"
-              style={{ height: stackH }}
+              style={{
+                height: stackH, // same vertical span as the two bars + gap
+                marginTop: Return_AXIS_BAND_PX, // align with bars (accounts for axis band)
+                rowGap: `${rowGap}px`, // match spacing between bars
+              }}
             >
               <div className="text-sm text-foreground">Realized</div>
               <div className="text-sm text-foreground">Margin</div>

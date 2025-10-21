@@ -1,0 +1,33 @@
+app/(analytics)/analytics/
+page.tsx # unchanged API; minor cleanup possible
+layout.tsx # unchanged
+components/
+performance-metrics/
+shared/
+palette.ts # central colors
+format.ts # usd/pct helpers
+date.ts # date math
+math.ts # clamp/abs etc.
+series.ts # data shaping helpers
+types.ts # unified cross-card types
+primitives/
+SignedBar.tsx # reusable diverging bar primitive
+ChartGuides.tsx # guides and labels overlay
+StatusPill.tsx # OK/Losing pill w/ tooltip-ready shell
+combined-performance-metrics/
+CombinedPerformanceMTDCard.tsx # uses primitives + shared utils
+ReturnChart.tsx # slim, 2-row diverging bars
+MaxDrawdownChart.tsx # slim, single-row variant
+HeaderBadges.tsx # unchanged API, uses format.ts
+symbol-pnl/
+NetPnlList.tsx # tighter, uses shared helpers
+types.ts # re-exported to shared/types and removed
+losing-days/
+LosingDaysCard.tsx # simplified + normalized pipeline
+helpers.ts # trimmed; most moved to shared/*
+types.ts # re-export from shared/types
+PerformanceMetricsClient.tsx # simplified; imports shared utils
+
+
+components/prefs/
+PrefsContext/index.ts # barrel if you want; optional
