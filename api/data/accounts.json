@@ -3,7 +3,7 @@
     "binanceName": "janus",
     "redisName": "janus",
     "dbName": "POSEIDON",
-    "strategy": "Janus",
+    "strategy": "Janus_Coint",
     "leverage": 5,
     "monitored": false
   },
@@ -19,7 +19,7 @@
     "binanceName": "algoforce1",
     "redisName": "algoforce1",
     "dbName": "ATLAS",
-    "strategy": "Adem",
+    "strategy": "Adem_Coint",
     "leverage": 10,
     "monitored": true
   },
@@ -27,7 +27,7 @@
     "binanceName": "mirrorx1",
     "redisName": "mirrorx1",
     "dbName": "mirrorx1",
-    "strategy": "Janus",
+    "strategy": "Janus_Coint",
     "leverage": 10,
     "monitored": true
   },
@@ -35,15 +35,15 @@
     "binanceName": "fund3",
     "redisName": "fund3",
     "dbName": "HERA",
-    "strategy": "Adem",
+    "strategy": "Adem_Coint",
     "leverage": 2,
     "monitored": true
   },
   {
     "binanceName": "algoforce5",
-    "redisName": "algoforce5", 
+    "redisName": "algoforce5",
     "dbName": "HYPERION",
-    "strategy": "Janus",
+    "strategy": "Janus_Coint",
     "leverage": 10,
     "monitored": true
   },
@@ -51,7 +51,7 @@
     "binanceName": "mirrorx2",
     "redisName": "mirrorx2",
     "dbName": "PRO",
-    "strategy": "Janus",
+    "strategy": "Janus_Coint",
     "leverage": 10,
     "monitored": true
   },
@@ -59,7 +59,7 @@
     "binanceName": "office",
     "redisName": "office",
     "dbName": "PRO",
-    "strategy": "Janus",
+    "strategy": "Janus_Coint",
     "leverage": 10,
     "monitored": true
   },
@@ -67,7 +67,7 @@
     "binanceName": "fund2",
     "redisName": "fund2",
     "dbName": "TITAN",
-    "strategy": "Janus",
+    "strategy": "Janus_Coint",
     "leverage": 2,
     "monitored": true
   },
@@ -75,7 +75,7 @@
     "binanceName": "mirrorx4",
     "redisName": "mirrorx4",
     "dbName": "ZEUS",
-    "strategy": "Adem",
+    "strategy": "Adem_Coint",
     "leverage": 10,
     "monitored": true
   },
@@ -83,7 +83,7 @@
     "binanceName": "team",
     "redisName": "team",
     "dbName": "ZEUS",
-    "strategy": "Adem",
+    "strategy": "Adem_Coint",
     "leverage": 10,
     "monitored": true
   },
@@ -91,7 +91,7 @@
     "binanceName": "mirrorx3",
     "redisName": "mirrorx3",
     "dbName": "ZEUS",
-    "strategy": "Adem",
+    "strategy": "Adem_Coint",
     "leverage": 10,
     "monitored": true
   }

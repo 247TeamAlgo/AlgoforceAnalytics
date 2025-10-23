@@ -1,3 +1,4 @@
+// app/(analytics)/analytics/components/performance-metrics/symbol-pnl/NetPnlList.tsx
 "use client";
 
 import {
@@ -15,6 +16,7 @@ import {
 } from "@/components/ui/tooltip";
 import { TrendingDown, TrendingUp } from "lucide-react";
 import { useMemo } from "react";
+import type { ReactNode } from "react";
 import type { Bucket, SymbolBreakdownMap } from "./types";
 import { METRICS_COLORS } from "../combined-performance-metrics/helpers";
 
@@ -39,8 +41,8 @@ type RowDatum = {
   id: string;
   label: string;
   value: number; // USD PnL
-  fillFrac: number; // reserved
-  totalPct: number; // signed % of basis
+  fillFrac: number; // reserved (non-visual)
+  totalPct: number; // signed % of basis used for the bar width
   sign: "pos" | "neg" | "zero";
   accounts?: Record<string, number>;
 };
@@ -58,39 +60,15 @@ type Props = {
   totalBasis?: number;
   selectedAccounts?: string[];
   symbolBreakdownMap?: SymbolBreakdownMap;
-  /** Pass payload.meta.window from the API; used for subtitle */
+  /** Kept for API compatibility; not displayed in the subtitle anymore */
   window?: PerformanceWindow;
 };
 
 /* --------------------------- sizing constants --------------------------- */
 
-const LABEL_CH = 10.5; // left label width; right value uses the SAME width
-const BAR_MIN_PCT = 3;
+const LABEL_CH = 10.5; // fixed-width columns for left label and right value
+const BAR_MIN_PCT = 3; // minimum visible bar when non-zero
 const RAIL_HEIGHT_PX = 20;
-
-/* ------------------------------ UI helpers ------------------------------ */
-
-function AccountsBadge({ accounts }: { accounts: string[] }) {
-  const count = accounts.length;
-  const tooltip = accounts.length
-    ? accounts.join(" • ")
-    : "No accounts selected";
-  return (
-    <TooltipProvider delayDuration={100}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="inline-flex items-center gap-2 rounded-md border bg-card/60 px-1.5 py-1 text-xs cursor-default">
-            <span className="text-muted-foreground">Accounts</span>
-            <span className="font-semibold text-foreground">{count}</span>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="top" align="start" className="text-xs">
-          {tooltip}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-}
 
 /* --------------------------------- ui --------------------------------- */
 
@@ -99,16 +77,16 @@ export default function NetPnlList({
   totalBasis,
   selectedAccounts = [],
   symbolBreakdownMap,
-  window,
+  window: _window, // preserved to avoid upstream API churn
 }: Props) {
-  const windowLabel =
-    window?.startDay && window?.endDay
-      ? `${window.startDay} → ${window.endDay}`
-      : "—";
+  // Simple, human subtitle (replaces date-range display)
+  const subtitle = "Net profit/loss by symbol across selected accounts.";
 
+  // Normalize incoming rows and compute percentages against a sane basis
   const data = useMemo<RowDatum[]>(() => {
     const list = (rows ?? []).slice();
 
+    // Default basis is “sum of absolute contributions” to avoid cancellation.
     let sumAbs = 0;
     for (let i = 0; i < list.length; i += 1) {
       sumAbs += Math.abs(Number(list[i]!.total) || 0);
@@ -136,6 +114,7 @@ export default function NetPnlList({
     });
   }, [rows, totalBasis]);
 
+  // Winners first (by absolute), then losers (most negative), zeros last
   const sorted = useMemo<RowDatum[]>(() => {
     const pos = data
       .filter((d) => d.sign === "pos")
@@ -147,6 +126,7 @@ export default function NetPnlList({
     return [...pos, ...neg, ...zero];
   }, [data]);
 
+  // Totals + extremes
   const stats = useMemo<Stats>(() => {
     if (!sorted.length) return { sum: 0, max: null, min: null };
     let sum = 0;
@@ -218,13 +198,13 @@ export default function NetPnlList({
     value,
   }: {
     swatch: string;
-    icon: React.ReactNode;
+    icon: ReactNode;
     label: string;
     value: string;
   }) => (
-    <span className="inline-flex items-center gap-2 rounded-md border bg-card/60 px-2.5 py-1 text-xs">
+    <span className="inline-flex items-center gap-2 rounded-[6px] border bg-card/60 px-2.5 py-1 text-xs">
       <span
-        className="h-2.5 w-2.5 rounded-[1px]"
+        className="h-2.5 w-2.5 rounded-[3px]"
         style={{ backgroundColor: swatch }}
       />
       {icon}
@@ -239,18 +219,15 @@ export default function NetPnlList({
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 px-6 pt-2 sm:py-3 grid grid-rows-[auto_auto_auto] gap-2">
             <CardTitle className="leading-tight">Symbol Net PnL</CardTitle>
-            {/* Subtitle equals the same time window as MTD */}
+            {/* Replaced date range with a simple description */}
             <CardDescription className="text-sm leading-snug">
-              {windowLabel}
+              {subtitle}
             </CardDescription>
 
             <div className="flex flex-wrap items-center gap-2">
-              {/* NEW: Accounts badge (no color icon) — appears BEFORE Total */}
-              <AccountsBadge accounts={selectedAccounts ?? []} />
-
               <Badge
                 swatch="var(--muted-foreground)"
-                icon={undefined}
+                icon={null}
                 label="Total"
                 value={usd(stats.sum)}
               />
@@ -288,7 +265,7 @@ export default function NetPnlList({
                       ? "text-red-500"
                       : "text-muted-foreground";
 
-                // bar width uses original % basis
+                // bar width uses share-of-activity basis
                 const widthPct = Math.max(
                   Math.min(Math.abs(d.totalPct), 100),
                   d.value !== 0 ? BAR_MIN_PCT : 0
@@ -303,7 +280,6 @@ export default function NetPnlList({
                       <li
                         data-role="row"
                         className="grid items-center gap-3 py-1.5"
-                        // SAME fixed width for left and right columns
                         style={{
                           gridTemplateColumns: `${LABEL_CH}ch minmax(0,1fr) ${LABEL_CH}ch`,
                         }}
@@ -323,7 +299,9 @@ export default function NetPnlList({
                             height: `${RAIL_HEIGHT_PX}px`,
                           }}
                         >
+                          {/* Zero line */}
                           <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px bg-border/50" />
+                          {/* Positive fill */}
                           {isPos && (
                             <div
                               className="absolute inset-y-0 left-1/2 bg-emerald-500 rounded-r-[2px]"
@@ -333,6 +311,7 @@ export default function NetPnlList({
                               }}
                             />
                           )}
+                          {/* Negative fill */}
                           {d.sign === "neg" && (
                             <div
                               className="absolute inset-y-0 left-1/2 -translate-x-full bg-red-500 rounded-l-[2px]"
@@ -344,7 +323,7 @@ export default function NetPnlList({
                           )}
                         </div>
 
-                        {/* Right value — SAME column width as left, left-aligned */}
+                        {/* Right value — left-aligned, fixed column width */}
                         <div
                           data-role="nums"
                           className="tabular-nums text-[11px] sm:text-xs text-left truncate"
@@ -354,6 +333,7 @@ export default function NetPnlList({
                       </li>
                     </TooltipTrigger>
 
+                    {/* Tooltip shows exact numbers + composition split */}
                     <TooltipContent
                       align="end"
                       side="top"

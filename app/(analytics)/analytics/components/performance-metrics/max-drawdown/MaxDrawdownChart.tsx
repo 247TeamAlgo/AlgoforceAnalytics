@@ -1,3 +1,4 @@
+// app/(analytics)/analytics/components/performance-metrics/combined-performance-metrics/MaxDrawdownChart.tsx
 "use client";
 
 import React from "react";
@@ -6,9 +7,8 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-  CardDescription,
 } from "@/components/ui/card";
-import { METRICS_COLORS } from "./helpers";
+import { METRICS_COLORS } from "../combined-performance-metrics/helpers";
 import {
   Tooltip,
   TooltipContent,
@@ -18,10 +18,7 @@ import {
 
 /* --------------------------- extra props for header --------------------------- */
 
-type WindowLike =
-  | { startDay?: string; endDay?: string }
-  | undefined
-  | null;
+type WindowLike = { startDay?: string; endDay?: string } | undefined | null;
 
 type Props = {
   /** payload.drawdown.margin.current.total (negative for DD) */
@@ -29,7 +26,8 @@ type Props = {
 
   /** kept for compatibility (no longer shown in tooltip) */
   breakdown?: Record<string, number>;
-  /** list of currently selected accounts (for the Accounts badge tooltip) */
+
+  /** kept for compatibility; badge removed */
   selectedAccounts?: string[];
 
   /** abs(payload.drawdown.margin.max.total) */
@@ -43,38 +41,6 @@ type Props = {
   barHeight?: number;
   barColumnPadX?: number;
 };
-
-/* ----------------------------- small header badge ---------------------------- */
-
-function AccountsBadge({ accounts }: { accounts?: string[] }) {
-  const list = Array.isArray(accounts) ? accounts : [];
-  const count = list.length;
-  if (!count) return null;
-
-  return (
-    <TooltipProvider delayDuration={120}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="inline-flex items-center gap-2 rounded-md border bg-card/60 px-2.5 py-1 text-xs cursor-default">
-            <span className="text-muted-foreground">Accounts</span>
-            <span className="font-semibold text-foreground">({count})</span>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent
-          side="top"
-          align="start"
-          className="p-2 rounded-md border bg-popover text-popover-foreground text-xs"
-        >
-          <div className="max-w-[240px] space-y-0.5">
-            {list.map((a) => (
-              <div key={a}>{a}</div>
-            ))}
-          </div>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-}
 
 /* ------------------------------- formatters -------------------------------- */
 
@@ -93,8 +59,6 @@ export function MaxDrawdownChart({
   /* maxRefLabel intentionally unused to avoid overlapping label */
   barHeight = 22,
   barColumnPadX = 10,
-  window,
-  selectedAccounts,
 }: Props) {
   const RAIL_BG = METRICS_COLORS.railBg;
 
@@ -113,7 +77,7 @@ export function MaxDrawdownChart({
   const leftPct = (v: number) => `${leftPctNum(v)}%`;
   const widthPct = `${(absV / maxAbs) * 100}%`;
 
-  // ticks at -2%, -4%, ... but hide those that would land outside the rail
+  // ticks at -2%, -4%, ...
   const levels2 = (() => {
     const arr: Array<{ value: number; label: string }> = [];
     for (let x = step; x <= topRounded + EPS; x += step) {
@@ -149,22 +113,12 @@ export function MaxDrawdownChart({
   const LABEL_H = 20;
   const LABEL_BOTTOM = 0;
 
-  const windowLabel =
-    window?.startDay && window?.endDay
-      ? `${window.startDay} → ${window.endDay}`
-      : "—";
-
   return (
     <Card className="py-0">
       <CardHeader className="border-b !p-0">
         <div className="px-6 pt-2 pb-3 sm:py-2">
           <CardTitle className="text-base">Current Drawdown</CardTitle>
-          <CardDescription className="text-sm leading-snug">
-            {windowLabel}
-          </CardDescription>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <AccountsBadge accounts={selectedAccounts} />
-          </div>
+          {/* Accounts badge removed */}
         </div>
       </CardHeader>
 
@@ -285,7 +239,7 @@ export function MaxDrawdownChart({
                 {l.label}
               </span>
             ))}
-            {/* We intentionally do NOT render a text label for the dashed max reference to avoid overlap */}
+            {/* no label for dashed max ref */}
           </div>
 
           {/* tooltip: CURRENT & MAX (totals only) */}
@@ -312,8 +266,8 @@ export function MaxDrawdownChart({
                       value < 0
                         ? "text-red-500"
                         : value > 0
-                        ? "text-emerald-500"
-                        : "text-muted-foreground"
+                          ? "text-emerald-500"
+                          : "text-muted-foreground"
                     }
                   >
                     {pct2(value)}

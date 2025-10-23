@@ -1,5 +1,6 @@
-// "@/components/prefs/types.ts"
 import { Dispatch, SetStateAction } from "react";
+
+/* ---------------- Accounts ---------------- */
 
 export type AccountMeta = {
   redisName: string;
@@ -27,39 +28,22 @@ export type AccountsContextValue = {
   setAnalyticsEarliest: Dispatch<SetStateAction<boolean>>;
 };
 
+/* ---------------- Metrics payloads ---------------- */
+
 export type Numeric = number;
 
-/**
- * A row keyed by account names and "total", each a dollar value.
- * Example: { fund2: 125.42, fund3: -12.03, total: 113.39 }
- */
+/** A row keyed by account names and "total", each a dollar value. */
 export type RegularReturnsRow = Record<string, Numeric>;
 
-/**
- * Regular Returns payload:
- * Keyed by session date label ("YYYY-MM-DD"), value is a RegularReturnsRow.
- * Matches the backend "regular_returns" object in performance_metrics.py.
- *
- * Example:
- * {
- *   "2025-10-18": { fund2: 12.3, fund3: -1.1, total: 11.2 },
- *   "2025-10-19": { fund2: 2.0,  fund3:  3.0, total:  5.0 }
- * }
- */
+/** Regular Returns payload keyed by session date ("YYYY-MM-DD"). */
 export type RegularReturnsPayload = Record<string, RegularReturnsRow>;
-
-/* ---------------------------------------------------------------------- */
-/* Existing types (abridged placeholders shown here for context)          */
-/* Keep your current definitions; only ensure PerformanceMetricsPayload    */
-/* is extended with the new field below.                                   */
-/* ---------------------------------------------------------------------- */
 
 export type EquitySeries = Record<string, Record<string, number>>;
 
 export interface PerformanceMetricsWindow {
   mode: "MTD" | "WTD" | "Custom";
   startDay: string; // "YYYY-MM-DD"
-  endDay: string; // "YYYY-MM-DD"
+  endDay: string;   // "YYYY-MM-DD"
 }
 
 export interface PerformanceMetricsMeta {
@@ -73,15 +57,23 @@ export interface PerformanceMetricsMeta {
 
 export interface AllTimeDDWindow {
   startDay: string; // "YYYY-MM-DD"
-  endDay: string; // "YYYY-MM-DD"
+  endDay: string;   // "YYYY-MM-DD"
 }
+
 export interface AllTimeDD {
   window: AllTimeDDWindow;
   realized: {
     current: Record<string, number>; // { fund2: -0.0312, ..., total: -0.045 }
-    max: Record<string, number>; // same shape
+    max: Record<string, number>;     // same shape
   };
 }
+
+/** Per-strategy performance entry (backend: performanceByStrategy[strategy]) */
+export type StrategyPerfEntry = {
+  accounts: string[];
+  drawdown: { realized: number; margin: number };
+  return: { realized: number; margin: number };
+};
 
 export interface PerformanceMetricsPayload {
   meta: PerformanceMetricsMeta;
@@ -121,11 +113,37 @@ export interface PerformanceMetricsPayload {
     symbols?: Record<string, Record<string, number>>;
     totalPerAccount?: Record<string, number>;
   };
+
+  /** Live UPNL block */
   uPnl?: {
     combined?: number;
     perAccount?: Record<string, number>;
+    /** Backend timestamp for uPnl payload; used for liveliness status */
+    asOf?: string;
   };
-  combined_coint_strategy?: unknown;
+
+  /** Dynamic JSON-driven strategy map (replaces any combined_coint_strategy usage). */
+  performanceByStrategy?: Record<string, StrategyPerfEntry>;
+
   regular_returns?: RegularReturnsPayload;
   all_time_max_current_dd?: AllTimeDD;
 }
+
+/* ---------------- Performance Metrics Context typing ---------------- */
+
+/** Liveness indicator for polling freshness */
+export type LiveStatus = "unknown" | "green" | "yellow" | "red";
+
+/** Back-compat alias if older code imported PerformanceStatus */
+export type PerformanceStatus = LiveStatus;
+
+export type PerformanceMetricsContextValue = {
+  performanceMetrics: PerformanceMetricsPayload | null;
+  performanceLoading: boolean;
+  performanceError: string | null;
+  performanceAsOf?: string;
+  performanceFetchedAt?: string;
+  performanceStatus: LiveStatus;
+  /** Manual refetch trigger exposed by the provider */
+  refreshPerformance: () => Promise<void>;
+};

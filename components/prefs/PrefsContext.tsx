@@ -1,4 +1,3 @@
-// components/prefs/PrefsProvider.tsx
 "use client";
 
 import * as React from "react";

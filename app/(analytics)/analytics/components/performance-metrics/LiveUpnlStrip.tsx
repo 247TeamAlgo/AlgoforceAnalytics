@@ -1,8 +1,17 @@
+// app/(analytics)/analytics/components/performance-metrics/LiveUpnlStrip.tsx
 "use client";
 
-import * as React from "react";
+import type { PerformanceMetricsWindow } from "@/components/prefs/types";
 import { Card } from "@/components/ui/card";
-import { Activity, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import {
+  Activity,
+  CalendarRange,
+  Users,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+} from "lucide-react";
 import { useMemo } from "react";
 
 function usd(n?: number): string {
@@ -17,7 +26,10 @@ function usd(n?: number): string {
 type Props = {
   combined?: number;
   perAccount?: Record<string, number>;
-  maxAccounts?: number; // <=0 means unlimited
+  /** preserved for backward-compat; ignored now (we show all accounts) */
+  maxAccounts?: number;
+  /** Pass payload.meta.window to show the current analytics date range on the right */
+  window?: PerformanceMetricsWindow;
 };
 
 function toneValue(n: number | undefined): "pos" | "neg" | "flat" {
@@ -50,95 +62,159 @@ function accountIcon(n: number | undefined) {
   return <Minus className="h-3.5 w-3.5 opacity-70" />;
 }
 
-export default function LiveUpnlStrip({
-  combined,
-  perAccount,
-  maxAccounts = 10,
-}: Props) {
-  const rows = useMemo(() => {
-    const entries = Object.entries(perAccount ?? {}).map(([key, v]) => ({
-      key,
-      label: key,
-      v: typeof v === "number" && Number.isFinite(v) ? v : Number(v) || 0,
-    }));
-    entries.sort((a, b) => b.v - a.v);
-    return entries;
-  }, [perAccount]);
+/** Right-aligned date-range pill (Window) */
+function WindowBadge({
+  window,
+  label,
+}: {
+  window?: PerformanceMetricsWindow;
+  label: string;
+}) {
+  const startDay = window?.startDay;
+  const endDay = window?.endDay;
 
-  const visible = useMemo(
-    () => (maxAccounts > 0 ? rows.slice(0, maxAccounts) : rows),
-    [rows, maxAccounts]
-  );
-  const hiddenCount = rows.length - visible.length;
+  const windowLabel = useMemo(() => {
+    if (startDay && endDay) return `${startDay} \u2192 ${endDay}`;
+    return "—";
+  }, [startDay, endDay]);
 
-  const combinedValue = useMemo(() => {
-    if (typeof combined === "number" && Number.isFinite(combined)) return combined;
-    return rows.reduce((s, r) => s + (Number.isFinite(r.v) ? r.v : 0), 0);
-  }, [combined, rows]);
+  const hasWindow = Boolean(startDay && endDay);
 
   return (
-    <Card className="p-2 sm:p-2.5 rounded-xl border shadow-sm">
-      <div
-        className="flex items-center gap-1.5 sm:gap-2 flex-nowrap overflow-x-auto whitespace-nowrap [&>*]:shrink-0"
-        aria-label="Unrealized PnL summary"
-      >
-        {/* TOTAL — same size as account chips, but subtly highlighted */}
-        <span
-          className={[
-            "inline-flex items-center gap-1.5 rounded-lg border px-2 py-0.5 text-[11px] leading-none",
-          ].join(" ")}
-          title="Total Unrealized PnL"
-        >
-          <Activity
-            className={["h-3.5 w-3.5", valueTextCls(combinedValue)].join(" ")}
-            aria-hidden
-          />
-          <span className="tracking-wide text-[11px] text-muted-foreground">
-            Total Unrealized PnL
-          </span>
-          <span
-            className={[
-              "font-semibold tabular-nums text-sm sm:text-[15px]",
-              valueTextCls(combinedValue),
-            ].join(" ")}
-          >
-            {usd(combinedValue)}
-          </span>
-        </span>
+    <span
+      className={[
+        "ml-auto inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-[11px] leading-none",
+        hasWindow ? "bg-card/60" : "bg-muted/30",
+        "shadow-sm",
+      ].join(" ")}
+      aria-label="Analytics date window"
+    >
+      <CalendarRange className="h-3.5 w-3.5 text-foreground/80" />
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-medium text-foreground">{windowLabel}</span>
+    </span>
+  );
+}
 
-        {/* Account badges — colored + trend icon */}
-        {visible.map((r) => (
+/** Accounts pill — same style as Window; embeds ALL account UPNL chips with horizontal scroll */
+function AccountsBadge({ rows }: { rows: { label: string; v: number }[] }) {
+  if (!rows.length) {
+    return (
+      <span
+        className={[
+          "inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-[11px] leading-none",
+          "bg-muted/30 shadow-sm",
+        ].join(" ")}
+        aria-label="Accounts in this view"
+      >
+        <Users className="h-3.5 w-3.5 text-foreground/80" />
+        <span className="text-muted-foreground">Accounts</span>
+        <span className="font-medium text-foreground">—</span>
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className={[
+        "inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-[11px] leading-none",
+        "bg-card/60 shadow-sm",
+        "max-w-full",
+      ].join(" ")}
+      aria-label="Accounts in this view"
+    >
+      <Users className="h-3.5 w-3.5 text-foreground/80" />
+      <span className="text-muted-foreground">Accounts</span>
+
+      {/* divider */}
+      <span className="mx-1 h-4 w-px bg-border/60" aria-hidden="true" />
+
+      {/* horizontally scrollable chip rail; responsive max-widths */}
+      <div className="flex items-center gap-1 overflow-x-auto pr-1 max-w-[60vw] sm:max-w-[70vw] md:max-w-[55vw] lg:max-w-[50vw]">
+        {rows.map((r) => (
           <span
-            key={r.key}
+            key={r.label}
             className={[
-              "inline-flex items-center gap-1.5 rounded-lg border px-2 py-0.5 text-[11px] leading-none",
+              "inline-flex items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-[11px] leading-none",
               "transition-colors",
               accountBadgeCls(r.v),
             ].join(" ")}
-            title={r.key}
+            title={r.label}
           >
             {accountIcon(r.v)}
-            <span className="font-medium truncate max-w-[140px]">{r.label}</span>
+            <span className="font-medium truncate max-w-[120px]">{r.label}</span>
             <span
-              className={[
-                "font-semibold tabular-nums text-sm sm:text-[15px]",
-                valueTextCls(r.v),
-              ].join(" ")}
+              className={["font-semibold tabular-nums", valueTextCls(r.v)].join(
+                " "
+              )}
             >
               {usd(r.v)}
             </span>
           </span>
         ))}
-
-        {hiddenCount > 0 ? (
-          <span
-            className="inline-flex items-center gap-1.5 rounded-lg border px-2 py-0.5 text-[11px] leading-none bg-muted/20 border-muted/30 text-muted-foreground"
-            title="Some accounts hidden due to maxAccounts"
-          >
-            +{hiddenCount} more
-          </span>
-        ) : null}
       </div>
+    </span>
+  );
+}
+
+export default function LiveUpnlStrip({
+  combined,
+  perAccount,
+  maxAccounts, // ignored (we now always show all accounts)
+  window,
+}: Props) {
+  const rows = useMemo(() => {
+    const entries = Object.entries(perAccount ?? {}).map(([key, v]) => ({
+      label: key,
+      v: typeof v === "number" && Number.isFinite(v) ? v : Number(v) || 0,
+    }));
+    // sort desc by value (largest gain first)
+    entries.sort((a, b) => b.v - a.v);
+    return entries;
+  }, [perAccount]);
+
+  const combinedValue = useMemo(() => {
+    if (typeof combined === "number" && Number.isFinite(combined))
+      return combined;
+    return rows.reduce((s, r) => s + (Number.isFinite(r.v) ? r.v : 0), 0);
+  }, [combined, rows]);
+
+  return (
+    <Card className="p-2 sm:p-2.5 rounded-xl border shadow-sm">
+      <TooltipProvider delayDuration={120}>
+        <div
+          className="flex items-center gap-1.5 sm:gap-2 flex-nowrap overflow-x-auto whitespace-nowrap [&>*]:shrink-0"
+          aria-label="Unrealized PnL summary"
+        >
+          {/* TOTAL — compact badge with colored value */}
+          <span
+            className="inline-flex items-center gap-1.5 rounded-lg border px-2 py-0.5 text-[11px] leading-none"
+            title="Total Unrealized PnL"
+          >
+            <Activity
+              className={["h-3.5 w-3.5", valueTextCls(combinedValue)].join(" ")}
+              aria-hidden
+            />
+            <span className="tracking-wide text-[11px] text-muted-foreground">
+              Total Unrealized PnL
+            </span>
+            <span
+              className={[
+                "font-semibold tabular-nums text-sm sm:text-[15px]",
+                valueTextCls(combinedValue),
+              ].join(" ")}
+            >
+              {usd(combinedValue)}
+            </span>
+          </span>
+
+          {/* ACCOUNTS — pill with ALL per-account UPNL chips (x-scroll inside) */}
+          <AccountsBadge rows={rows} />
+
+          {/* Right-aligned date window badge */}
+          <WindowBadge window={window} label="Window" />
+        </div>
+      </TooltipProvider>
     </Card>
   );
 }

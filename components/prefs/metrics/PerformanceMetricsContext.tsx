@@ -1,5 +1,3 @@
-// app/metrics/PerformanceMetricsContext.tsx
-// (adjusted to hit /v1/performance_metrics and send repeated `accounts` params)
 "use client";
 
 import * as React from "react";
@@ -19,6 +17,8 @@ import {
   useRef,
   useState,
 } from "react";
+
+/* ------------- utils ------------- */
 
 async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -54,9 +54,12 @@ function statusFrom(asOf?: string, fetchedAt?: string): LiveStatus {
   return "red";
 }
 
+/* ------------- context ------------- */
+
 const PerformanceMetricsContext = createContext<
   PerformanceMetricsContextValue | undefined
 >(undefined);
+
 const REFRESH_DELAY_MS = 4000;
 
 export function PerformanceMetricsProvider({
@@ -100,7 +103,7 @@ export function PerformanceMetricsProvider({
       const json = await fetchJsonRetry<PerformanceMetricsPayload>(url);
       setPerformanceMetrics(json);
 
-      // New payload uses camelCase `asOf`
+      // uPnl.asOf is typed now
       const asOf = json?.uPnl?.asOf;
       setPerformanceAsOf(asOf);
       setPerformanceFetchedAt(new Date().toISOString());

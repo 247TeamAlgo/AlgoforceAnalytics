@@ -104,7 +104,7 @@ def losing_days_mtd(accounts: list[str], day_start_hour: int) -> dict[str, objec
     today = now.normalize()
     month_start = today.replace(day=1)
 
-    # Determine the latest *complete* shifted-day label we’re allowed to include.
+    # Determine the latest *complete* shifted-day label were allowed to include.
     last_complete = _last_complete_label(now, day_start_hour)
     if last_complete is None or last_complete < month_start:
         # Nothing complete yet this month (e.g., early morning on the 1st/2nd before the cut).

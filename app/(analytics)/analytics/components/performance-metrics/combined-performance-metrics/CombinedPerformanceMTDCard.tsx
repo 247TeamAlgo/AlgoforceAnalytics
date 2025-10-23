@@ -11,15 +11,9 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import DrawdownChart from "./DrawdownChart";
 import { HeaderBadges } from "./HeaderBadges";
+import { computeSeriesOverWindow } from "./helpers";
 import { ReturnChart } from "./ReturnChart";
 import { BulkMetricsResponse, DateToRow } from "./types";
-import { computeSeriesOverWindow } from "./helpers";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 
 function sumSelected(
   row: Record<string, number> | undefined,
@@ -45,7 +39,7 @@ function pickDateKey(
   if (preferDay) {
     if (Object.prototype.hasOwnProperty.call(byDate, preferDay))
       return preferDay;
-    const k2 = keys.find((k) => k.startsWith(preferDay)); // match "YYYY-MM-DD 00:00:00"
+    const k2 = keys.find((k) => k.startsWith(preferDay));
     if (k2) return k2;
   }
   keys.sort();
@@ -55,35 +49,6 @@ function pickDateKey(
 /** Round to 2 decimals without changing non-finite values. */
 function round2(n: number): number {
   return Number.isFinite(n) ? Math.round(n * 100) / 100 : n;
-}
-
-// Simple “Accounts (N)” badge with tooltip of account names
-function AccountsBadge({ accounts }: { accounts: string[] }) {
-  const count = accounts?.length ?? 0;
-  if (!count) return null;
-  return (
-    <TooltipProvider delayDuration={150}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="inline-flex items-center gap-2 rounded-md border bg-card/60 px-1.5 py-1 text-xs cursor-default">
-            <span className="text-muted-foreground">Accounts</span>
-            <span className="font-semibold text-foreground">({count})</span>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent
-          align="start"
-          side="top"
-          className="p-2 rounded-md border bg-popover text-popover-foreground text-xs"
-        >
-          <div className="max-w-[220px]">
-            {accounts.map((a) => (
-              <div key={a}>{a}</div>
-            ))}
-          </div>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
 }
 
 export default function CombinedPerformanceMTDCard({
@@ -100,11 +65,7 @@ export default function CombinedPerformanceMTDCard({
     [selected, bulk.accounts]
   );
 
-  const windowLabel =
-    bulk?.window?.startDay && bulk?.window?.endDay
-      ? `${bulk.window.startDay} → ${bulk.window.endDay}`
-      : "MTD";
-
+  // We still use the window bounds to compute the series; we just don't render them.
   const { startDay = "", endDay = "" } = bulk.window ?? {};
 
   // Charts (realized series already pivoted to account->day)
@@ -115,7 +76,7 @@ export default function CombinedPerformanceMTDCard({
     return computeSeriesOverWindow(series, accs, startDay, endDay);
   }, [bulk.balance, bulk.balancePreUpnl, accs, startDay, endDay]);
 
-  // Header from SQL sources — raw values first
+  // Header numbers
   const startBalRaw = useMemo(() => {
     const init = bulk.initial_balances ?? {};
     let s = 0;
@@ -151,12 +112,11 @@ export default function CombinedPerformanceMTDCard({
 
   const deltaBalRaw = totalBalRaw - startBalRaw;
 
-  // Strictly rounded values (2 decimals) — used ONLY for display in HeaderBadges
   const startBal = useMemo(() => round2(startBalRaw), [startBalRaw]);
   const totalBal = useMemo(() => round2(totalBalRaw), [totalBalRaw]);
   const deltaBal = useMemo(() => round2(deltaBalRaw), [deltaBalRaw]);
 
-  // Totals (unchanged)
+  // Totals
   const realizedReturn =
     bulk?.combinedLiveMonthlyReturn?.total ??
     bulk?.mtdReturn?.realized?.total ??
@@ -200,6 +160,9 @@ export default function CombinedPerformanceMTDCard({
   const rowGap = Math.round(barHeight * 0.55);
   const barColumnPadX = 10;
 
+  // Ultra-short one-liner description (non-wrapping)
+  const desc = "MTD returns & drawdowns — realized vs margin (+uPnL & Initial Unrealized PnL).";
+
   return (
     <Card className="py-0">
       <CardHeader className="border-b !p-0">
@@ -208,13 +171,14 @@ export default function CombinedPerformanceMTDCard({
             <CardTitle className="leading-tight">
               Month-to-Date Performance
             </CardTitle>
-            <CardDescription className="text-sm leading-snug">
-              {windowLabel}
+            <CardDescription
+              className="text-sm leading-snug truncate whitespace-nowrap max-w-full"
+              title={desc}
+            >
+              {desc}
             </CardDescription>
 
             <div className="flex flex-wrap items-center gap-2">
-              {/* NEW: Accounts (N) badge before balance badges */}
-              <AccountsBadge accounts={accs} />
               <HeaderBadges
                 totalBal={totalBal}
                 startBal={startBal}

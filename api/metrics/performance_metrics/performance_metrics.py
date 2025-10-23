@@ -5,13 +5,18 @@ Changes:
 - Reflect UPnL (from up_map) into the MTD realized percent by injecting per-account
   UPnL into the last row of the realized equity series before computing mtd_return.
 - Expose both realized MTD% variants:
-    * mtd_ret_realized_pure:     realized-only (no UPnL)
+    * mtd_ret_realized_pure:      realized-only (no UPnL)
     * mtd_ret_realized_with_upnl: realized + last-row UPnL injection (used in payload)
+- Remove any hardcoded strategy names. Strategy aggregation is derived dynamically
+  from api/data/accounts.json and exposed as `performanceByStrategy`.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
+from pathlib import Path
+from typing import TypedDict, cast
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -130,11 +135,7 @@ def _offset_fixed_with_initial(
 def _inject_upnl_last_row(
     levels: DataFrame, up_map: dict[str, float], accounts: list[str]
 ) -> DataFrame:
-    """Return a copy of `levels` where each account's last row is incremented by its UPnL.
-
-    This mirrors the behavior often used in dashboards where UPnL is applied
-    only on the latest point to express a 'live' end-of-period equity.
-    """
+    """Return a copy of `levels` where each account's last row is incremented by its UPnL."""
     if levels.empty:
         return levels
     out = levels.copy()
@@ -162,21 +163,13 @@ def _live_returns_block(
     float,
     float,
 ]:
-    """Compute live realized/margin returns (USD and %) per account and totals.
-
-    Definitions (matching CLI):
-    - Realized: ((last_realized + upnl) - init) / init
-    - Margin:   ((last_realized + upnl) - (init + unreal_json)) / (init + unreal_json)
-
-    Totals are computed by summation of parts, not by averaging percents.
-    """
+    """Compute live realized/margin returns (USD and %) per account and totals."""
     last_ts = _last_index(fixed)
     realized_usd: dict[str, float] = {}
     realized_pct: dict[str, float] = {}
     margin_usd: dict[str, float] = {}
     margin_pct: dict[str, float] = {}
 
-    # Per-account
     for a in accs:
         init = float(init_map.get(a, 0.0))
         last_realized = (
@@ -191,7 +184,6 @@ def _live_returns_block(
         realized_usd[a], realized_pct[a] = usd_r, pct_r
         margin_usd[a], margin_pct[a] = usd_m, pct_m
 
-    # Totals
     init_total = float(sum(init_map.get(a, 0.0) for a in accs))
     unreal_total = float(sum(unreal_map.get(a, 0.0) for a in accs))
     last_realized_total = _sum_row(fixed, last_ts, accs)
@@ -205,7 +197,6 @@ def _live_returns_block(
     denom_margin_total = init_total + unreal_total
     margin_pct["total"] = (live_total / denom_margin_total - 1.0) if denom_margin_total else 0.0
 
-    # NOTE: return the *defined* locals, not underscored names
     return (
         realized_usd,
         realized_pct,
@@ -224,12 +215,7 @@ def _current_dd_block(
     margin: pd.DataFrame,
     up_map: dict[str, float],
 ) -> tuple[dict[str, float], dict[str, float]]:
-    """Compute current drawdown per account and totals for realized and margin.
-
-    Realized uses (last_realized + upnl) vs peak of realized.
-    Margin uses margin series levels (which already include unrealized_json baseline
-    and last-row UPNL).
-    """
+    """Compute current drawdown per account and totals for realized and margin."""
     last_ts = _last_index(fixed)
 
     fixed_total = fixed.assign(total=fixed[accs].sum(axis=1)) if not fixed.empty else fixed
@@ -245,7 +231,6 @@ def _current_dd_block(
     last_realized_total = _sum_row(fixed, last_ts, accs)
     up_total = float(up_map.get("total", 0.0))
     curr_realized_total = last_realized_total + up_total
-
     last_margin_total = _sum_row(margin, last_ts, accs)
 
     curr_dd_realized_total = (
@@ -280,18 +265,72 @@ def _current_dd_block(
     return current_dd_realized, current_dd_margin
 
 
+# ---------- Accounts.json helpers (dynamic strategy grouping) ----------
+
+
+class AccountMeta(TypedDict):
+    binanceName: str
+    redisName: str
+    dbName: str
+    strategy: str
+    leverage: int
+    monitored: bool
+
+
+def _find_accounts_json() -> Path | None:
+    """Try plausible locations for api/data/accounts.json relative to this file."""
+    here = Path(__file__).resolve()
+    candidates = [
+        here.parents[2] / "data" / "accounts.json",  # api/metrics/... -> api/data/accounts.json
+        here.parents[3] / "api" / "data" / "accounts.json",  # project-root/api/data/accounts.json
+        Path("api/data/accounts.json"),  # cwd relative
+        Path("data/accounts.json"),
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return None
+
+
+def _load_accounts_index() -> dict[str, AccountMeta]:
+    """Load accounts.json and index by lowercased redisName."""
+    path = _find_accounts_json()
+    if not path:
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        items = cast(list[AccountMeta], data)
+    except Exception:
+        return {}
+    index: dict[str, AccountMeta] = {}
+    for row in items:
+        rn = str(row.get("redisName", "")).strip().lower()
+        if rn:
+            index[rn] = row
+    return index
+
+
+def _group_accounts_by_strategy(
+    accs: list[str],
+    accounts_index: dict[str, AccountMeta],
+    include_none: bool = False,
+) -> dict[str, list[str]]:
+    """Build {strategy: [accounts...]} for the requested accounts."""
+    groups: dict[str, list[str]] = {}
+    for a in accs:
+        meta = accounts_index.get(a.lower())
+        strategy = (meta.get("strategy") if meta else None) or "None"
+        if not include_none and strategy.lower() == "none":
+            continue
+        groups.setdefault(strategy, []).append(a)
+    return groups
+
+
 # ---------- Main entry ----------
 
 
 def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
-    """Return the full metrics payload for requested accounts.
-
-    Alignment with CLI:
-    - Window runs MTD up to *today@00:00* (Europe/Zurich).
-    - Current DD uses realized+UPNL vs realized peak; margin uses margin levels.
-    - Max DD is computed from *levels* (not returns) over the MTD window.
-    - mtd_ret_realized now reflects *last-row UPnL injection* per account.
-    """
+    """Return the full metrics payload for requested accounts."""
     accs = [a.strip().lower() for a in accounts if a.strip()]
     start_day, today, _yesterday = _mtd_window_today()
     print(f"start_day = {start_day}")
@@ -317,12 +356,10 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
     # Margin equity (shift by unrealized.json across the index + inject UPNL on the last row)
     margin = build_margin_series(fixed, unreal_map, up_map, accs)
 
-    # ----- Realized MTD returns -----
-    # 1) Pure realized (no UPnL)
+    # Realized MTD returns
     fixed_total_pure = fixed.assign(total=fixed[accs].sum(axis=1)) if not fixed.empty else fixed
     mtd_ret_realized_pure = mtd_return(fixed_total_pure) if not fixed_total_pure.empty else {}
 
-    # 2) With UPnL injected on last row per account
     fixed_with_up = _inject_upnl_last_row(fixed, up_map, accs)
     fixed_total_with_up = (
         fixed_with_up.assign(total=fixed_with_up[accs].sum(axis=1))
@@ -333,31 +370,29 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
         mtd_return(fixed_total_with_up) if not fixed_total_with_up.empty else {}
     )
 
-    # Margin MTD returns (unchanged; already includes unrealized baseline + last-row UPnL)
+    # Margin MTD returns
     margin_total = margin.assign(total=margin[accs].sum(axis=1)) if not margin.empty else margin
     mtd_ret_margin = mtd_return(margin_total) if not margin_total.empty else {}
 
-    # Live returns (per CLI, realized and margin)
+    # Live returns
     (
         realized_usd,
         realized_pct,
         margin_usd,
         margin_pct,
         init_total,
-        _last_realized_total,  # intentionally unused; keep for debugging
-        _live_total,  # intentionally unused; keep for debugging
-        _unreal_total,  # intentionally unused; keep for debugging
+        _last_realized_total,
+        _live_total,
+        _unreal_total,
     ) = _live_returns_block(accs, fixed, init_map, up_map, unreal_map)
 
-    # Drawdowns (current + MTD max from *levels*)
+    # Drawdowns
     current_dd_realized, current_dd_margin = _current_dd_block(accs, fixed, margin, up_map)
     mdd_fixed = mtd_max_dd_from_levels(fixed_total_pure) if not fixed_total_pure.empty else {}
     mdd_margin = mtd_max_dd_from_levels(margin_total) if not margin_total.empty else {}
 
-    # Losing days (exclude today; combined loss by sum-of-PnL rule)
+    # Losing days and PnL by symbol
     losing = losing_days_mtd(accs, day_start_hour=8)
-
-    # PnL per symbol (realized only)
     symbols, totals_by_acc = pnl_by_symbol_mtd(accs, str(start_day.date()), str(today.date()))
 
     # Serialize equity blocks
@@ -380,9 +415,9 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
         ),
     }
 
-    # ---------------- Strategy rollups (Janus/Charm) ----------------
-    janus_accs = [a for a in accs if a.lower() in {"fund2"}]
-    adem_accs = [a for a in accs if a.lower() in {"fund3"}]
+    # Performance by strategy (dynamic from accounts.json)
+    accounts_index = _load_accounts_index()
+    strategy_groups = _group_accounts_by_strategy(accs, accounts_index, include_none=False)
 
     def _subset_up(up_full: dict[str, float], subset: list[str]) -> dict[str, float]:
         sub = {a: float(up_full.get(a, 0.0)) for a in subset}
@@ -415,9 +450,6 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
             else margin_sub
         )
 
-        # ret_realized_map = (
-        #     mtd_return(fixed_total_with_up_sub) if not fixed_total_with_up_sub.empty else {}
-        # )
         levels_for_ret_realized = (
             fixed_total_with_up_sub if not fixed_total_with_up_sub.empty else fixed_total_pure_sub
         )
@@ -429,10 +461,6 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
         ret_realized = float(ret_realized_map.get("total", 0.0))
         ret_margin = float(ret_margin_map.get("total", 0.0))
 
-        # mdd_realized_map = (
-        #     mtd_max_dd_from_levels(fixed_total_pure_sub) if not fixed_total_pure_sub.empty else {}
-        # )
-        # Change to compute the realized MDD from the with-UPnL-on-last-row series
         levels_for_mdd_realized = (
             fixed_total_with_up_sub if not fixed_total_with_up_sub.empty else fixed_total_pure_sub
         )
@@ -441,7 +469,6 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
             if not levels_for_mdd_realized.empty
             else {}
         )
-
         mdd_margin_map = (
             mtd_max_dd_from_levels(margin_total_sub) if not margin_total_sub.empty else {}
         )
@@ -451,10 +478,16 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
 
         return dd_realized, dd_margin, ret_realized, ret_margin
 
-    janus_dd_r, janus_dd_m, janus_ret_r, janus_ret_m = _strategy_metrics(janus_accs)
-    adem_dd_r, adem_dd_m, adem_ret_r, adem_ret_m = _strategy_metrics(adem_accs)
+    performance_by_strategy: dict[str, dict[str, object]] = {}
+    for strat, subset in strategy_groups.items():
+        dd_r, dd_m, ret_r, ret_m = _strategy_metrics(subset)
+        performance_by_strategy[strat] = {
+            "accounts": subset,
+            "drawdown": {"realized": dd_r, "margin": dd_m},
+            "return": {"realized": ret_r, "margin": ret_m},
+        }
 
-    # ---------------- Regular Returns for all accounts ----------------
+    # Regular returns + all-time DD
     regular_df = regular_returns_by_session(
         accs, start_day, today, day_start_hour=8, tz="Europe/Zurich"
     )
@@ -497,28 +530,8 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
         "losingDays": losing,
         "symbolPnlMTD": {"symbols": symbols, "totalPerAccount": totals_by_acc},
         "uPnl": upnl_payload(accs),
-        "combined_coint_strategy": {
-            "drawdown": {
-                "realized": {
-                    "janus_coint": janus_dd_r,
-                    "adem_coint": adem_dd_r,
-                },
-                "margin": {
-                    "janus_coint": janus_dd_m,
-                    "adem_coint": adem_dd_m,
-                },
-            },
-            "return": {
-                "realized": {
-                    "janus_coint": janus_ret_r,
-                    "adem_coint": adem_ret_r,
-                },
-                "margin": {
-                    "janus_coint": janus_ret_m,
-                    "adem_coint": adem_ret_m,
-                },
-            },
-        },
+        # Renamed: dynamic, JSON-driven strategy aggregation
+        "performanceByStrategy": performance_by_strategy,
         "regular_returns": regular_returns,
         "all_time_max_current_dd": all_time_dd,
     }
