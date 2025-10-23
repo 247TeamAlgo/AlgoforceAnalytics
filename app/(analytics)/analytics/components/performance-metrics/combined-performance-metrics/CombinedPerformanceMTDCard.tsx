@@ -14,6 +14,12 @@ import { HeaderBadges } from "./HeaderBadges";
 import { ReturnChart } from "./ReturnChart";
 import { BulkMetricsResponse, DateToRow } from "./types";
 import { computeSeriesOverWindow } from "./helpers";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 function sumSelected(
   row: Record<string, number> | undefined,
@@ -49,6 +55,35 @@ function pickDateKey(
 /** Round to 2 decimals without changing non-finite values. */
 function round2(n: number): number {
   return Number.isFinite(n) ? Math.round(n * 100) / 100 : n;
+}
+
+// Simple “Accounts (N)” badge with tooltip of account names
+function AccountsBadge({ accounts }: { accounts: string[] }) {
+  const count = accounts?.length ?? 0;
+  if (!count) return null;
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex items-center gap-2 rounded-md border bg-card/60 px-1.5 py-1 text-xs cursor-default">
+            <span className="text-muted-foreground">Accounts</span>
+            <span className="font-semibold text-foreground">({count})</span>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent
+          align="start"
+          side="top"
+          className="p-2 rounded-md border bg-popover text-popover-foreground text-xs"
+        >
+          <div className="max-w-[220px]">
+            {accounts.map((a) => (
+              <div key={a}>{a}</div>
+            ))}
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
 }
 
 export default function CombinedPerformanceMTDCard({
@@ -178,6 +213,8 @@ export default function CombinedPerformanceMTDCard({
             </CardDescription>
 
             <div className="flex flex-wrap items-center gap-2">
+              {/* NEW: Accounts (N) badge before balance badges */}
+              <AccountsBadge accounts={accs} />
               <HeaderBadges
                 totalBal={totalBal}
                 startBal={startBal}

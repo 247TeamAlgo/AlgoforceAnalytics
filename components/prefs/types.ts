@@ -1,4 +1,31 @@
 // "@/components/prefs/types.ts"
+import { Dispatch, SetStateAction } from "react";
+
+export type AccountMeta = {
+  redisName: string;
+  display?: string | null;
+  monitored?: boolean;
+};
+
+export type AnalyticsRange = {
+  start?: string;
+  end?: string;
+};
+
+export type AccountsContextValue = {
+  navbarVisible: boolean;
+
+  analyticsAccounts: AccountMeta[];
+  analyticsSelectedAccounts: string[];
+  setAnalyticsSelectedAccounts: Dispatch<SetStateAction<string[]>>;
+  analyticsLoading: boolean;
+  reloadAccounts: () => Promise<void>;
+
+  analyticsRange: AnalyticsRange;
+  setAnalyticsRange: Dispatch<SetStateAction<AnalyticsRange>>;
+  analyticsEarliest: boolean;
+  setAnalyticsEarliest: Dispatch<SetStateAction<boolean>>;
+};
 
 export type Numeric = number;
 
@@ -41,6 +68,18 @@ export interface PerformanceMetricsMeta {
   flags?: {
     missingInitialBalanceAccounts?: string[];
     zeroInitialBalanceAccounts?: string[];
+  };
+}
+
+export interface AllTimeDDWindow {
+  startDay: string; // "YYYY-MM-DD"
+  endDay: string; // "YYYY-MM-DD"
+}
+export interface AllTimeDD {
+  window: AllTimeDDWindow;
+  realized: {
+    current: Record<string, number>; // { fund2: -0.0312, ..., total: -0.045 }
+    max: Record<string, number>; // same shape
   };
 }
 
@@ -87,11 +126,6 @@ export interface PerformanceMetricsPayload {
     perAccount?: Record<string, number>;
   };
   combined_coint_strategy?: unknown;
-
-  /**
-   * NEW: regular session-based returns (08:00 → 07:59), per-day map.
-   * Keys: "YYYY-MM-DD" (session label dates).
-   * Values: per-account dollars plus "total".
-   */
   regular_returns?: RegularReturnsPayload;
+  all_time_max_current_dd?: AllTimeDD;
 }

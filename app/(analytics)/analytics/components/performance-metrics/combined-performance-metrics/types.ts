@@ -37,6 +37,5 @@ export type BulkMetricsResponse = {
   sql_historical_balances?: { realized?: DateToRow; margin?: DateToRow };
   initial_balances?: Record<string, number>;
 
-  // NEW: strategy rollups passed through from API
   combinedCointStrategy?: CombinedCointStrategy;
 };

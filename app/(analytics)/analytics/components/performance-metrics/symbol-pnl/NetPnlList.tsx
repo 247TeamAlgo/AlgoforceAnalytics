@@ -28,7 +28,6 @@ function usd(n: number): string {
     maximumFractionDigits: 2,
   })}`;
 }
-
 function pct2(n: number): string {
   const v = Number.isFinite(n) ? n : 0;
   return `${v.toFixed(2)}%`;
@@ -48,11 +47,19 @@ type RowDatum = {
 
 type Stats = { sum: number; max: RowDatum | null; min: RowDatum | null };
 
+type PerformanceWindow = {
+  mode: "MTD" | "WTD" | "Custom";
+  startDay: string;
+  endDay: string;
+};
+
 type Props = {
   rows: Bucket[];
   totalBasis?: number;
   selectedAccounts?: string[];
   symbolBreakdownMap?: SymbolBreakdownMap;
+  /** Pass payload.meta.window from the API; used for subtitle */
+  window?: PerformanceWindow;
 };
 
 /* --------------------------- sizing constants --------------------------- */
@@ -61,14 +68,44 @@ const LABEL_CH = 10.5; // left label width; right value uses the SAME width
 const BAR_MIN_PCT = 3;
 const RAIL_HEIGHT_PX = 20;
 
+/* ------------------------------ UI helpers ------------------------------ */
+
+function AccountsBadge({ accounts }: { accounts: string[] }) {
+  const count = accounts.length;
+  const tooltip = accounts.length
+    ? accounts.join(" • ")
+    : "No accounts selected";
+  return (
+    <TooltipProvider delayDuration={100}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex items-center gap-2 rounded-md border bg-card/60 px-1.5 py-1 text-xs cursor-default">
+            <span className="text-muted-foreground">Accounts</span>
+            <span className="font-semibold text-foreground">{count}</span>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" align="start" className="text-xs">
+          {tooltip}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 /* --------------------------------- ui --------------------------------- */
 
 export default function NetPnlList({
   rows,
   totalBasis,
-  selectedAccounts,
+  selectedAccounts = [],
   symbolBreakdownMap,
+  window,
 }: Props) {
+  const windowLabel =
+    window?.startDay && window?.endDay
+      ? `${window.startDay} → ${window.endDay}`
+      : "—";
+
   const data = useMemo<RowDatum[]>(() => {
     const list = (rows ?? []).slice();
 
@@ -202,11 +239,15 @@ export default function NetPnlList({
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 px-6 pt-2 sm:py-3 grid grid-rows-[auto_auto_auto] gap-2">
             <CardTitle className="leading-tight">Symbol Net PnL</CardTitle>
+            {/* Subtitle equals the same time window as MTD */}
             <CardDescription className="text-sm leading-snug">
-              Realized net per symbol
+              {windowLabel}
             </CardDescription>
 
             <div className="flex flex-wrap items-center gap-2">
+              {/* NEW: Accounts badge (no color icon) — appears BEFORE Total */}
+              <AccountsBadge accounts={selectedAccounts ?? []} />
+
               <Badge
                 swatch="var(--muted-foreground)"
                 icon={undefined}

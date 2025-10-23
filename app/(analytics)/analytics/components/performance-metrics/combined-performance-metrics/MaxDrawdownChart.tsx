@@ -1,7 +1,13 @@
 "use client";
 
 import React from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { METRICS_COLORS } from "./helpers";
 import {
   Tooltip,
@@ -10,35 +16,85 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
+/* --------------------------- extra props for header --------------------------- */
+
+type WindowLike =
+  | { startDay?: string; endDay?: string }
+  | undefined
+  | null;
+
 type Props = {
   /** payload.drawdown.margin.current.total (negative for DD) */
   value: number;
 
   /** kept for compatibility (no longer shown in tooltip) */
   breakdown?: Record<string, number>;
+  /** list of currently selected accounts (for the Accounts badge tooltip) */
   selectedAccounts?: string[];
 
   /** abs(payload.drawdown.margin.max.total) */
   maxRefAbs?: number;
+  /** ignored for label rendering (we only draw the dashed line now) */
   maxRefLabel?: string;
+
+  /** show the same date window label as other MTD widgets */
+  window?: WindowLike;
 
   barHeight?: number;
   barColumnPadX?: number;
 };
 
-function pct4(n: number): string {
-  return `${(n * 100).toFixed(4)}%`;
+/* ----------------------------- small header badge ---------------------------- */
+
+function AccountsBadge({ accounts }: { accounts?: string[] }) {
+  const list = Array.isArray(accounts) ? accounts : [];
+  const count = list.length;
+  if (!count) return null;
+
+  return (
+    <TooltipProvider delayDuration={120}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex items-center gap-2 rounded-md border bg-card/60 px-2.5 py-1 text-xs cursor-default">
+            <span className="text-muted-foreground">Accounts</span>
+            <span className="font-semibold text-foreground">({count})</span>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent
+          side="top"
+          align="start"
+          className="p-2 rounded-md border bg-popover text-popover-foreground text-xs"
+        >
+          <div className="max-w-[240px] space-y-0.5">
+            {list.map((a) => (
+              <div key={a}>{a}</div>
+            ))}
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
 }
+
+/* ------------------------------- formatters -------------------------------- */
+
 const POS_COLOR = "hsl(142 72% 45%)";
 const NEG_COLOR = "hsl(0 72% 51%)";
 const ALERT_RED = "#ef4444";
 
+/** 2-decimal percent formatter (as requested) */
+function pct2(n: number): string {
+  return `${(n * 100).toFixed(2)}%`;
+}
+
 export function MaxDrawdownChart({
   value,
   maxRefAbs = 0,
-  maxRefLabel,
+  /* maxRefLabel intentionally unused to avoid overlapping label */
   barHeight = 22,
   barColumnPadX = 10,
+  window,
+  selectedAccounts,
 }: Props) {
   const RAIL_BG = METRICS_COLORS.railBg;
 
@@ -82,10 +138,8 @@ export function MaxDrawdownChart({
   const HEADER_COLOR = breached ? ALERT_RED : value < 0 ? NEG_COLOR : POS_COLOR;
   const BAR_COLOR = HEADER_COLOR;
 
-  // show max ref if inside rail
+  // show max ref if inside rail (dashed line only; no axis label text)
   const showMaxRef = absMaxRef > 0 && absMaxRef / maxAbs < 0.999;
-  const maxRefText =
-    maxRefLabel ?? (showMaxRef ? `-${Math.round(absMaxRef * 100)}%` : "");
 
   // layout
   const BAR_TOP = 16;
@@ -95,16 +149,27 @@ export function MaxDrawdownChart({
   const LABEL_H = 20;
   const LABEL_BOTTOM = 0;
 
+  const windowLabel =
+    window?.startDay && window?.endDay
+      ? `${window.startDay} → ${window.endDay}`
+      : "—";
+
   return (
     <Card className="py-0">
       <CardHeader className="border-b !p-0">
         <div className="px-6 pt-2 pb-3 sm:py-2">
           <CardTitle className="text-base">Current Drawdown</CardTitle>
+          <CardDescription className="text-sm leading-snug">
+            {windowLabel}
+          </CardDescription>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <AccountsBadge accounts={selectedAccounts} />
+          </div>
         </div>
       </CardHeader>
 
       <CardContent className="p-3 sm:p-4">
-        {/* Header container (styled like Losing Days row, no badge) */}
+        {/* Header container (value pill) */}
         <div
           className="mb-2 flex items-center justify-between rounded-lg border bg-card px-3 py-2"
           style={{
@@ -119,7 +184,7 @@ export function MaxDrawdownChart({
             style={{ color: HEADER_COLOR }}
             aria-label="Current combined margin drawdown"
           >
-            {pct4(value)}
+            {pct2(value)}
           </div>
         </div>
 
@@ -220,17 +285,7 @@ export function MaxDrawdownChart({
                 {l.label}
               </span>
             ))}
-            {showMaxRef && (
-              <span
-                className="absolute"
-                style={{
-                  ...tickLabelStyle(absMaxRef),
-                  left: `calc(${leftPct(absMaxRef)} + ${barColumnPadX}px)`,
-                }}
-              >
-                {maxRefText}
-              </span>
-            )}
+            {/* We intentionally do NOT render a text label for the dashed max reference to avoid overlap */}
           </div>
 
           {/* tooltip: CURRENT & MAX (totals only) */}
@@ -249,22 +304,24 @@ export function MaxDrawdownChart({
               >
                 <div className="mb-1 font-semibold">Margin Drawdown</div>
                 <div className="grid grid-cols-[auto_auto] gap-x-4 gap-y-1">
-                  <span className="text-muted-foreground">Current (total)</span>
+                  <span className="text-muted-foreground">
+                    Current (All Time)
+                  </span>
                   <span
                     className={
                       value < 0
                         ? "text-red-500"
                         : value > 0
-                          ? "text-emerald-500"
-                          : "text-muted-foreground"
+                        ? "text-emerald-500"
+                        : "text-muted-foreground"
                     }
                   >
-                    {pct4(value)}
+                    {pct2(value)}
                   </span>
 
-                  <span className="text-muted-foreground">Max MTD (total)</span>
+                  <span className="text-muted-foreground">Max (All Time)</span>
                   <span className="text-red-500">
-                    {absMaxRef > 0 ? `-${(absMaxRef * 100).toFixed(4)}%` : "—"}
+                    {absMaxRef > 0 ? `-${(absMaxRef * 100).toFixed(2)}%` : "—"}
                   </span>
                 </div>
               </TooltipContent>

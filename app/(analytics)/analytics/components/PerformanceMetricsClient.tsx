@@ -1,3 +1,4 @@
+// app/(analytics)/analytics/components/PerformanceMetricsClient.tsx
 "use client";
 
 import { ChevronDown } from "lucide-react";
@@ -85,7 +86,7 @@ function reshapeRealizedToAccountSeries(
   for (const [rawKey, row] of Object.entries(byDate)) {
     const day = rawKey.includes(" ") ? rawKey.split(" ")[0] : rawKey; // "YYYY-MM-DD"
     for (const acc of accounts) {
-      const v = row[acc];
+      const v = (row as Record<string, number>)[acc];
       if (typeof v === "number" && Number.isFinite(v)) out[acc][day] = v;
     }
   }
@@ -113,7 +114,7 @@ export default function PerformanceMetricClient({
     const src = payload?.uPnl?.perAccount ?? {};
     const filtered: Record<string, number> = {};
     for (const a of accounts ?? []) {
-      const v = src[a];
+      const v = (src as Record<string, number | string | null | undefined>)[a];
       if (typeof v === "number" && Number.isFinite(v)) filtered[a] = v;
       else if (v != null) filtered[a] = Number(v) || 0;
     }
@@ -132,7 +133,7 @@ export default function PerformanceMetricClient({
     const symMap = payload?.symbolPnlMTD?.symbols ?? {};
     const out: Bucket[] = [];
     for (const [sym, vals] of Object.entries(symMap)) {
-      const total = Number(vals.TOTAL ?? 0);
+      const total = Number((vals as Record<string, unknown>).TOTAL ?? 0);
       if (Number.isFinite(total)) out.push({ label: sym, total });
     }
     out.sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
@@ -167,6 +168,12 @@ export default function PerformanceMetricClient({
       ),
     [payload?.equity?.realized?.series, accounts]
   );
+
+  // Window label (MTD window from backend)
+  const windowLabel = useMemo(() => {
+    const w = payload?.meta?.window;
+    return w?.startDay && w?.endDay ? `${w.startDay} → ${w.endDay}` : "MTD";
+  }, [payload?.meta?.window]);
 
   // Prepare the object CombinedPerformanceMTDCard expects
   const combinedBulk: BulkMetricsResponse = useMemo(() => {
@@ -243,18 +250,27 @@ export default function PerformanceMetricClient({
 
   const [devOpen, setDevOpen] = useState<boolean>(false);
 
+  // ---------- All-time realized drawdown values (no hooks; safe before early return) ----------
+  const currentDdAllTimeRealizedMap: Record<string, number> | undefined =
+    payload?.all_time_max_current_dd?.realized?.current ?? undefined;
+
+  const currentDdAllTimeRealizedTotal: number = (() => {
+    const v = payload?.all_time_max_current_dd?.realized?.current?.total;
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+    // fallback to current MTD margin if all-time not present
+    return Number(payload?.drawdown?.margin?.current?.total ?? 0);
+  })();
+
+  const maxDdAllTimeRealizedAbs: number = (() => {
+    const v = payload?.all_time_max_current_dd?.realized?.max?.total;
+    const n = Number(v);
+    if (Number.isFinite(n)) return Math.abs(n);
+    // fallback to MTD margin max if all-time not present
+    return Math.abs(Number(payload?.drawdown?.margin?.max?.total ?? 0));
+  })();
+
   if (initialLoading) return <InitialLoadSkeleton />;
-
-  // inside component (near other derived values)
-  const currentDdMarginTotal: number = Number(
-    payload?.drawdown?.margin?.current?.total ?? 0
-  );
-  const currentDdMarginMap: Record<string, number> | undefined =
-    payload?.drawdown?.margin?.current ?? undefined;
-
-  const maxDdMarginTotalAbs: number = Math.abs(
-    Number(payload?.drawdown?.margin?.max?.total ?? 0)
-  );
 
   return (
     <div className="space-y-4">
@@ -277,25 +293,28 @@ export default function PerformanceMetricClient({
               bulk={combinedBulk}
               selected={accounts}
               combinedUpnl={payload?.uPnl?.combined ?? 0}
+              // No extra props needed; Accounts badge is inside this component
             />
-            <CombinedPerformanceStratMTDCard
-              bulk={combinedBulk}
-              selected={accounts}
-              combinedUpnl={payload?.uPnl?.combined ?? 0}
+            <RegularReturnsBarGraph
+              accounts={accounts}
+              data={payload?.regular_returns ?? {}}
+              window={payload?.meta?.window}
             />
           </div>
 
           <div className="space-y-4">
             <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
-              {/* Regular Returns */}
-              <RegularReturnsBarGraph
-                accounts={accounts}
-                data={payload?.regular_returns ?? {}}
+              <CombinedPerformanceStratMTDCard
+                bulk={combinedBulk}
+                selected={accounts}
+                combinedUpnl={payload?.uPnl?.combined ?? 0}
+                // This card will render Janus/Adem badges in its own header
               />
               <NetPnlList
                 rows={symbolRows}
                 selectedAccounts={accounts}
                 symbolBreakdownMap={payload?.symbolPnlMTD?.symbols}
+                window={payload?.meta?.window}
               />
             </div>
           </div>
@@ -361,11 +380,15 @@ export default function PerformanceMetricClient({
             accounts={accountList}
             variant="list"
           />
+
+          {/* All-time realized drawdown widget */}
           <MaxDrawdownChart
-            value={currentDdMarginTotal} // current margin DD (bar height)
-            breakdown={currentDdMarginMap} // (unused in tooltip now, but kept for compatibility)
+            value={currentDdAllTimeRealizedTotal}
+            breakdown={currentDdAllTimeRealizedMap}
             selectedAccounts={accounts}
-            maxRefAbs={maxDdMarginTotalAbs} // extra dashed line at MDD (abs)
+            maxRefAbs={maxDdAllTimeRealizedAbs}
+            maxRefLabel="All-time max"
+            window={payload?.meta?.window}   // <- NEW: show same date range subtitle
           />
         </div>
       </div>

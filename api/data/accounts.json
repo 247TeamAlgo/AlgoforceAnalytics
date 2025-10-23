@@ -19,7 +19,7 @@
     "binanceName": "algoforce1",
     "redisName": "algoforce1",
     "dbName": "ATLAS",
-    "strategy": "Charm",
+    "strategy": "Adem",
     "leverage": 10,
     "monitored": true
   },
@@ -35,7 +35,7 @@
     "binanceName": "fund3",
     "redisName": "fund3",
     "dbName": "HERA",
-    "strategy": "Charm",
+    "strategy": "Adem",
     "leverage": 2,
     "monitored": true
   },
@@ -75,7 +75,7 @@
     "binanceName": "mirrorx4",
     "redisName": "mirrorx4",
     "dbName": "ZEUS",
-    "strategy": "Charm",
+    "strategy": "Adem",
     "leverage": 10,
     "monitored": true
   },
@@ -83,7 +83,7 @@
     "binanceName": "team",
     "redisName": "team",
     "dbName": "ZEUS",
-    "strategy": "Charm",
+    "strategy": "Adem",
     "leverage": 10,
     "monitored": true
   },
@@ -91,7 +91,7 @@
     "binanceName": "mirrorx3",
     "redisName": "mirrorx3",
     "dbName": "ZEUS",
-    "strategy": "Charm",
+    "strategy": "Adem",
     "leverage": 10,
     "monitored": true
   }

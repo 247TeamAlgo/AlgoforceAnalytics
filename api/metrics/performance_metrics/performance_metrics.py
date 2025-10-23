@@ -21,6 +21,7 @@ from ...core.config import now_utc_iso
 from ...db.baseline import read_unrealized_json
 from ...db.redis import read_upnl, upnl_payload
 from ...db.sql import nearest_balance_on_or_before
+from .calculations.all_time_dd import compute_all_time_max_current_dd
 from .calculations.drawdown import mtd_max_dd_from_levels
 from .calculations.equity import build_fixed_balances, build_margin_series
 from .calculations.losing_days import losing_days_mtd
@@ -458,6 +459,7 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
         accs, start_day, today, day_start_hour=8, tz="Europe/Zurich"
     )
     regular_returns = _serialize_series(regular_df, accs) if not regular_df.empty else {}
+    all_time_dd = compute_all_time_max_current_dd(accs)
 
     payload: dict[str, object] = {
         "meta": {
@@ -518,5 +520,6 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
             },
         },
         "regular_returns": regular_returns,
+        "all_time_max_current_dd": all_time_dd,
     }
     return payload
