@@ -77,7 +77,6 @@ export default function NetPnlList({
   totalBasis,
   selectedAccounts = [],
   symbolBreakdownMap,
-  window: _window, // preserved to avoid upstream API churn
 }: Props) {
   // Simple, human subtitle (replaces date-range display)
   const subtitle = "Net profit/loss by symbol across selected accounts.";

@@ -95,8 +95,6 @@ export default function PerformanceMetricClient({
   payload,
   loading,
   error,
-  asOf: _asOf,
-  fetchedAt: _fetchedAt,
 }: Props) {
   const [hasLoadedOnce, setHasLoadedOnce] = useState<boolean>(
     Boolean(payload) || Boolean(error)

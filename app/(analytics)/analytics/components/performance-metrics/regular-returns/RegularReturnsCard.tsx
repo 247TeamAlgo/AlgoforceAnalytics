@@ -244,12 +244,6 @@ export default function RegularReturnsCard({ accounts, data }: Props) {
     [yCeil]
   );
 
-  /* Totals + Best/Worst/WinRate (best/worst from daily stats) */
-  const totalShown = useMemo(
-    () => displayed.reduce((s, p) => s + p.value, 0),
-    [displayed]
-  );
-
   const bestDay = useMemo(() => {
     if (!dailyPoints.length) return null;
     return dailyPoints.reduce(

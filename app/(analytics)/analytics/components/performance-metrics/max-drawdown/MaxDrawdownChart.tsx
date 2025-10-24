@@ -41,7 +41,6 @@ export function MaxDrawdownChart({
   description = "Combined margin drawdown vs all-time max. Hover bar for more details.",
 }: Props) {
   const RAIL_BG = METRICS_COLORS.railBg;
-  const GUIDE = METRICS_COLORS.guide;
   const BORDER = "hsl(var(--border))";
   const FG = "hsl(var(--foreground))";
 

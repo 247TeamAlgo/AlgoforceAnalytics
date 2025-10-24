@@ -269,6 +269,17 @@ def _current_dd_block(
 
 
 class AccountMeta(TypedDict):
+    """Metadata for an account entry loaded from api/data/accounts.json.
+
+    Keys:
+        binanceName: Exchange display name for the account.
+        redisName: Name used as the Redis key (normalized/lowercased).
+        dbName: Database identifier for SQL lookups.
+        strategy: Strategy or group name the account belongs to.
+        leverage: Leverage used for the account (integer).
+        monitored: Whether this account is monitored by the system.
+    """
+
     binanceName: str
     redisName: str
     dbName: str

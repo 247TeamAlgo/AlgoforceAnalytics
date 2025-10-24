@@ -50,44 +50,6 @@ const PALETTE = [
   "#4b5563", // gray-600
 ];
 
-/* A compact, consistent metric pill (dot • icon • label • bold value) */
-function MetricPill({
-  dot,
-  icon,
-  label,
-  value,
-  valueTone, // "pos" | "neg" | "muted"
-}: {
-  dot: string;
-  icon?: React.ReactNode;
-  label: string;
-  value: string;
-  valueTone?: "pos" | "neg" | "muted";
-}) {
-  const toneCls =
-    valueTone === "pos"
-      ? "text-emerald-500"
-      : valueTone === "neg"
-        ? "text-red-500"
-        : "text-foreground";
-  return (
-    <span className="inline-flex items-center gap-2 rounded-[10px] border bg-card/60 px-3 py-1 text-xs shadow-sm">
-      <span
-        aria-hidden
-        className="h-2.5 w-2.5 rounded-[3px]"
-        style={{ backgroundColor: dot }}
-      />
-      {icon ? (
-        <span aria-hidden className="mr-0.5">
-          {icon}
-        </span>
-      ) : null}
-      <span className="text-muted-foreground">{label}</span>
-      <span className={`font-semibold ${toneCls}`}>{value}</span>
-    </span>
-  );
-}
-
 /* A tiny chip used inside the Strategies pill; responsive tooltip layout */
 function StrategyChip({
   name,
