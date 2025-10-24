@@ -1,8 +1,9 @@
 "use client";
 
-import * as React from "react";
-import { BadgeCheck, ShieldCheck, Server, Search, Users } from "lucide-react";
+import { usePrefs } from "@/components/prefs/PrefsContext";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -12,13 +13,12 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { usePrefs } from "@/components/prefs/PrefsContext";
-import { toast } from "sonner";
+import { BadgeCheck, Search, Server, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { SiBinance } from "react-icons/si";
+import { toast } from "sonner";
 
 export function AccountsDialog() {
   const {
@@ -94,7 +94,7 @@ export function AccountsDialog() {
           aria-label="Open accounts selection dialog"
           className="h-9 gap-2"
         >
-          <Users className="h-4 w-4" aria-hidden />
+          <SiBinance className="h-4 w-4 text-amber-400" />
           Accounts
           <Badge variant="secondary" className="ml-1">
             {analyticsSelectedAccounts?.length ?? 0}/{accounts?.length ?? 0}

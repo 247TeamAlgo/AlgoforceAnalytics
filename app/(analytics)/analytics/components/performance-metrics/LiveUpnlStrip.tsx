@@ -4,10 +4,10 @@
 import type { PerformanceMetricsWindow } from "@/components/prefs/types";
 import { Card } from "@/components/ui/card";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { SiBinance } from "react-icons/si";
 import {
   Activity,
   CalendarRange,
-  Users,
   TrendingUp,
   TrendingDown,
   Minus,
@@ -107,7 +107,7 @@ function AccountsBadge({ rows }: { rows: { label: string; v: number }[] }) {
         ].join(" ")}
         aria-label="Accounts in this view"
       >
-        <Users className="h-3.5 w-3.5 text-foreground/80" />
+        <SiBinance className="h-3.5 w-3.5 text-amber-400" />
         <span className="text-muted-foreground">Accounts</span>
         <span className="font-medium text-foreground">—</span>
       </span>
@@ -123,7 +123,7 @@ function AccountsBadge({ rows }: { rows: { label: string; v: number }[] }) {
       ].join(" ")}
       aria-label="Accounts in this view"
     >
-      <Users className="h-3.5 w-3.5 text-foreground/80" />
+      <SiBinance className="h-3.5 w-3.5 text-amber-400" />
       <span className="text-muted-foreground">Accounts</span>
 
       {/* divider */}
@@ -142,7 +142,9 @@ function AccountsBadge({ rows }: { rows: { label: string; v: number }[] }) {
             title={r.label}
           >
             {accountIcon(r.v)}
-            <span className="font-medium truncate max-w-[120px]">{r.label}</span>
+            <span className="font-medium truncate max-w-[120px]">
+              {r.label}
+            </span>
             <span
               className={["font-semibold tabular-nums", valueTextCls(r.v)].join(
                 " "
@@ -157,12 +159,7 @@ function AccountsBadge({ rows }: { rows: { label: string; v: number }[] }) {
   );
 }
 
-export default function LiveUpnlStrip({
-  combined,
-  perAccount,
-  maxAccounts, // ignored (we now always show all accounts)
-  window,
-}: Props) {
+export default function LiveUpnlStrip({ combined, perAccount, window }: Props) {
   const rows = useMemo(() => {
     const entries = Object.entries(perAccount ?? {}).map(([key, v]) => ({
       label: key,
@@ -212,7 +209,7 @@ export default function LiveUpnlStrip({
           <AccountsBadge rows={rows} />
 
           {/* Right-aligned date window badge */}
-          <WindowBadge window={window} label="Window" />
+          <WindowBadge window={window} label="Window (UTC)" />
         </div>
       </TooltipProvider>
     </Card>

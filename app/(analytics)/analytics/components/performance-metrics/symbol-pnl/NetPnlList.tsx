@@ -234,13 +234,13 @@ export default function NetPnlList({
               <Badge
                 swatch="#22c55e"
                 icon={<TrendingUp className="h-3.5 w-3.5 text-emerald-500" />}
-                label={`Highest${stats.max ? ` ${stats.max.label}` : ""}`}
+                label={`Highest • ${stats.max ? ` ${stats.max.label}` : ""}`}
                 value={stats.max ? usd(stats.max.value) : "—"}
               />
               <Badge
                 swatch="#ef4444"
                 icon={<TrendingDown className="h-3.5 w-3.5 text-red-500" />}
-                label={`Lowest${stats.min ? ` ${stats.min.label}` : ""}`}
+                label={`Lowest • ${stats.min ? ` ${stats.min.label}` : ""}`}
                 value={stats.min ? usd(stats.min.value) : "—"}
               />
             </div>

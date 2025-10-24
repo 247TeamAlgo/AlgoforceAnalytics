@@ -14,11 +14,17 @@ import { METRICS_COLORS } from "../combined-performance-metrics/helpers";
 import {
   ApiPayload,
   AccountMini,
-  LosingDaysPayload, // legacy flat map type expected by helpers.toRows
+  LosingDaysPayload,
   Row,
   ThresholdLevel,
 } from "./types";
 import { niceUsd, tallyByStrategyMap, toRows } from "./helpers";
+
+/* -------------------------------- theme -------------------------------- */
+
+const PRIMARY_FG = "hsl(var(--primary-foreground))";
+const MUTED_FG = "hsl(var(--muted-foreground))";
+const BORDER = "hsl(var(--border))";
 
 /* ------------------------------- fetch hook ------------------------------- */
 
@@ -39,7 +45,6 @@ function useLosingDaysFromApi(apiUrl?: string) {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = (await res.json()) as ApiPayload;
         if (cancelled) return;
-        // we normalize below in the component; here just pass through
         setData(json?.losingDays as unknown as LosingDaysPayload);
       } catch (e) {
         if (cancelled) return;
@@ -63,11 +68,12 @@ function StatusPill({ losing, color }: { losing: boolean; color: string }) {
   const base =
     "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] leading-none";
   if (losing) {
+    // Losing: vivid color to signal risk.
     return (
       <span
         className={base}
         style={{
-          color: "var(--card)",
+          color: PRIMARY_FG,
           backgroundColor: color,
           borderColor: color,
         }}
@@ -77,9 +83,17 @@ function StatusPill({ losing, color }: { losing: boolean; color: string }) {
       </span>
     );
   }
+  // Normal: very subdued — dim the whole badge.
   return (
-    <span className={base}>
-      <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" />
+    <span
+      className={`${base} opacity-60`}
+      style={{
+        color: MUTED_FG,
+        backgroundColor: "transparent",
+        borderColor: BORDER,
+      }}
+    >
+      <ShieldCheck className="h-3.5 w-3.5" />
       <span className="text-muted-foreground">OK</span>
     </span>
   );
@@ -114,7 +128,9 @@ function BadgeWithTooltip({
         <div className="mb-1 font-semibold">{row.account}</div>
         <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 mb-1">
           <span className="text-muted-foreground">Current</span>
-          <span style={{ color }}>{row.current}</span>
+          <span style={{ color: isLosing ? color : MUTED_FG }}>
+            {row.current}
+          </span>
         </div>
 
         {hasLosing ? (
@@ -126,7 +142,10 @@ function BadgeWithTooltip({
                   <span className="text-[11px] text-muted-foreground">
                     {day}
                   </span>
-                  <span className="text-[11px] font-medium" style={{ color }}>
+                  <span
+                    className="text-[11px] font-medium"
+                    style={{ color: isLosing ? color : MUTED_FG }}
+                  >
                     {niceUsd(pnl)}
                   </span>
                 </li>
@@ -150,9 +169,7 @@ function BadgeWithTooltip({
 
 /* ---------------------------------- view ---------------------------------- */
 
-/** Normalize new API shape { perAccount: {...}, combined: {...} } to the flat map helpers.toRows expects. */
 function normalizeToFlatMap(src: unknown): LosingDaysPayload {
-  // Expected legacy flat map: { [accountOrTOTAL]: { consecutive: number, days: { [YYYY-MM-DD]: number } } }
   const out: LosingDaysPayload = {};
 
   if (
@@ -190,7 +207,6 @@ function normalizeToFlatMap(src: unknown): LosingDaysPayload {
     return out;
   }
 
-  // If it's already the legacy shape, just trust it.
   return (src as LosingDaysPayload) ?? {};
 }
 
@@ -204,21 +220,27 @@ export default function LosingDaysCard({
     { value: 8, label: "8d" },
     { value: 10, label: "10d" },
   ],
-  levelColors = ["#FFC761", "#FFA94D", "#FF7043", "hsl(0 84% 62%)"],
+  levelColors = [
+    "hsl(var(--primary))",
+    "hsl(var(--primary))",
+    "hsl(var(--primary))",
+    "hsl(var(--primary))",
+  ],
   defaultBarColor = METRICS_COLORS.margin,
   variant = "list",
+  description = "Consecutive losing days by account. Hover badges for details.",
 }: {
   apiUrl?: string;
-  losingDays?: unknown; // new API shape or legacy flat map
+  losingDays?: unknown;
   accounts?: AccountMini[];
   levels?: ThresholdLevel[];
   levelColors?: string[];
   defaultBarColor?: string;
   variant?: "list" | "tiles";
+  description?: string;
 }) {
   const { data: fetched, loading, error } = useLosingDaysFromApi(apiUrl);
 
-  // Normalize incoming structure so UI never shows "perAccount" literally
   const flatSource: LosingDaysPayload = useMemo(() => {
     const src = losingDays ?? fetched ?? {};
     return normalizeToFlatMap(src);
@@ -244,7 +266,6 @@ export default function LosingDaysCard({
     return map;
   }, [accounts]);
 
-  // still compute strategy rollups (subtitle)
   const { perStrategy } = useMemo(
     () =>
       tallyByStrategyMap(
@@ -263,7 +284,6 @@ export default function LosingDaysCard({
       );
   }, [perStrategy]);
 
-  // rows already sorted with TOTAL forced to bottom (via helpers.toRows)
   const sortedRows = useMemo(() => rows.slice(), [rows]);
 
   const firstThreshold: number = useMemo(() => {
@@ -277,8 +297,9 @@ export default function LosingDaysCard({
     <Card className="py-0">
       <CardHeader className="border-b !p-0">
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0 px-6 pt-2 sm:py-1.5 grid grid-rows-[auto_auto] gap-2">
-            <CardTitle className="text-base">Consecutive Losing Days</CardTitle>
+          <div className="min-w-0 px-6 pt-2 sm:py-1.5 grid grid-rows-[auto_auto] gap-1.5">
+            <CardTitle className="text-base">Lose Streak (Daily)</CardTitle>
+            <div className="text-xs text-muted-foreground">{description}</div>
             {perStrategySorted.length > 0 && (
               <div className="text-xs text-muted-foreground px-0.5">
                 Top strategies by streak sum:{" "}
@@ -316,21 +337,29 @@ export default function LosingDaysCard({
                   <li
                     key={r.account}
                     className="flex items-center justify-between rounded-lg border bg-card px-3 py-2"
-                    style={{
-                      boxShadow: `inset 0 0 0 2px color-mix(in oklab, ${valueColor} 22%, transparent)`,
-                    }}
+                    style={
+                      isAtOrAboveThreshold
+                        ? {
+                            boxShadow: `inset 0 0 0 2px color-mix(in oklab, ${valueColor} 22%, transparent)`,
+                          }
+                        : undefined
+                    }
                     title={displayName}
                   >
                     <div className="min-w-0">
+                      {/* Account name stays strong */}
                       <div className="truncate text-sm font-medium">
                         {displayName}
                       </div>
                     </div>
 
                     <div className="flex items-center gap-2">
+                      {/* Days count: never muted; highlight only when threshold is hit */}
                       <span
                         className="text-2xl font-bold leading-none tracking-tight"
-                        style={{ color: valueColor }}
+                        style={{
+                          color: isAtOrAboveThreshold ? valueColor : undefined,
+                        }}
                       >
                         {r.current}
                       </span>
@@ -338,7 +367,6 @@ export default function LosingDaysCard({
                       <BadgeWithTooltip
                         isLosing={isAtOrAboveThreshold}
                         color={valueColor}
-                        // pass display name into tooltip too
                         row={{ ...r, account: displayName }}
                       />
                     </div>
@@ -359,11 +387,16 @@ export default function LosingDaysCard({
                   <div
                     key={r.account}
                     className="rounded-xl border bg-card text-card-foreground shadow-sm transition-shadow hover:shadow"
-                    style={{
-                      boxShadow: `inset 0 0 0 2px color-mix(in oklab, ${valueColor} 24%, transparent)`,
-                    }}
+                    style={
+                      isAtOrAboveThreshold
+                        ? {
+                            boxShadow: `inset 0 0 0 2px color-mix(in oklab, ${valueColor} 24%, transparent)`,
+                          }
+                        : undefined
+                    }
                   >
                     <div className="flex items-start justify-between gap-1 px-3 pt-2">
+                      {/* Account name stays strong */}
                       <div className="break-words text-sm font-medium leading-snug">
                         {displayName}
                       </div>
@@ -375,9 +408,12 @@ export default function LosingDaysCard({
                     </div>
                     <div className="px-3 pb-3 pt-1">
                       <div className="flex items-center justify-center gap-2">
+                        {/* Days count: never muted; highlight only when threshold is hit */}
                         <div
                           className="text-3xl font-bold leading-none tracking-tight sm:text-4xl"
-                          style={{ color: valueColor }}
+                          style={{
+                            color: isAtOrAboveThreshold ? valueColor : undefined,
+                          }}
                         >
                           {r.current}
                         </div>

@@ -1,9 +1,9 @@
 "use client";
 
-import { Users } from "lucide-react";
 import Link from "next/link";
 
 import { usePrefs } from "@/components/prefs/PrefsContext";
+import { SiBinance } from "react-icons/si";
 import { AccountsDialog } from "../analytics/AccountsDialog";
 import { ThemeMenu } from "./ThemeSubmenu";
 
@@ -115,7 +115,7 @@ export function Navbar() {
               className="h-9 inline-flex items-center gap-2 rounded-md border px-3 text-xs text-muted-foreground cursor-not-allowed"
               title="Loading accounts…"
             >
-              <Users className="h-4 w-4" />
+              <SiBinance className="h-4 w-4 text-amber-400" />
               Accounts
             </button>
           )}

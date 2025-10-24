@@ -22,7 +22,7 @@ import {
   YAxis,
   type TooltipProps,
 } from "recharts";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, TrendingUp, TrendingDown } from "lucide-react";
 
 /* ----------------------------- Types ------------------------------ */
 
@@ -138,18 +138,30 @@ const VerticalTick: React.FC<CustomTickProps> = ({ x = 0, y = 0, payload }) => (
   </g>
 );
 
-/* Small reference-style pill (dot • label • bold value) */
-const MetricPill: React.FC<{ dot?: string; label: string; value: string }> = ({
-  dot,
-  label,
-  value,
-}) => (
-  <span className="inline-flex items-center gap-2 rounded-[10px] border bg-card/60 px-3 py-1 text-xs shadow-sm">
+/* Reference-style pill (dot • optional icon • label • bold value) */
+const MetricPill: React.FC<{
+  dot?: string;
+  icon?: React.ReactNode;
+  label: string;
+  value: string;
+  ringColor?: string;
+}> = ({ dot, icon, label, value, ringColor }) => (
+  <span
+    className="inline-flex items-center gap-2 rounded-[10px] border bg-card/60 px-3 py-1 text-xs shadow-sm"
+    style={
+      ringColor
+        ? {
+            boxShadow: `inset 0 0 0 1px var(--border), 0 0 0 2px color-mix(in oklab, ${ringColor} 18%, transparent)`,
+          }
+        : undefined
+    }
+  >
     <span
       aria-hidden
       className="h-2.5 w-2.5 rounded-[3px]"
       style={{ backgroundColor: dot ?? "var(--foreground)" }}
     />
+    {icon ? <span aria-hidden className="mr-0.5">{icon}</span> : null}
     <span className="text-muted-foreground">{label}</span>
     <span className="font-semibold text-foreground">{value}</span>
   </span>
@@ -157,7 +169,7 @@ const MetricPill: React.FC<{ dot?: string; label: string; value: string }> = ({
 
 /* ----------------------------- Component -------------------------- */
 
-export default function RegularReturnsCard2({ accounts, data }: Props) {
+export default function RegularReturnsCard({ accounts, data }: Props) {
   const [range, setRange] = useState<Range>("Daily");
 
   /* Normalize payload → daily points */
@@ -232,7 +244,12 @@ export default function RegularReturnsCard2({ accounts, data }: Props) {
     [yCeil]
   );
 
-  /* Best/Worst/WinRate (from daily stats) */
+  /* Totals + Best/Worst/WinRate (best/worst from daily stats) */
+  const totalShown = useMemo(
+    () => displayed.reduce((s, p) => s + p.value, 0),
+    [displayed]
+  );
+
   const bestDay = useMemo(() => {
     if (!dailyPoints.length) return null;
     return dailyPoints.reduce(
@@ -333,16 +350,21 @@ export default function RegularReturnsCard2({ accounts, data }: Props) {
 
           {dailyPoints.length > 0 && (
             <div className="mt-2 flex flex-wrap items-center gap-2">
+              {/* Highest with icon */}
               <MetricPill
                 dot="hsl(142 72% 45%)"
-                label={`Best Day${bestDay ? ` • ${bestDay.label}` : ""}`}
+                icon={<TrendingUp className="h-3.5 w-3.5 text-emerald-500" />}
+                label={`Highest${bestDay ? ` • ${bestDay.label}` : ""}`}
                 value={bestDay ? usd(bestDay.value) : "—"}
               />
+              {/* Lowest with icon */}
               <MetricPill
                 dot="hsl(0 72% 51%)"
-                label={`Worst Day${worstDay ? ` • ${worstDay.label}` : ""}`}
+                icon={<TrendingDown className="h-3.5 w-3.5 text-red-500" />}
+                label={`Lowest${worstDay ? ` • ${worstDay.label}` : ""}`}
                 value={worstDay ? usd(worstDay.value) : "—"}
               />
+              {/* Win rate keeps the same simple style (no icon in your ref) */}
               <MetricPill
                 dot="hsl(200 70% 45%)"
                 label="Win Rate"
@@ -361,18 +383,18 @@ export default function RegularReturnsCard2({ accounts, data }: Props) {
         ) : (
           <ChartContainer
             config={{ value: { label: "PnL" } }}
-            className="h-[370px] w-full"
+            className="items-center justify-center w-full"
           >
             <BarChart
               data={displayed}
-              barCategoryGap={6}
-              barGap={2}
-              margin={{ top: 14, right: 12, bottom: 78, left: 0 }}
+              barCategoryGap={1}
+              barGap={1}
+              margin={{ top: 12, right: 12, bottom: 0, left: 0 }}
             >
               <CartesianGrid
                 stroke="var(--border)"
-                strokeOpacity={0.35}
-                strokeDasharray="4 4"
+                strokeOpacity={0.8}
+                strokeDasharray="6 6"
                 horizontal
                 vertical
               />
@@ -380,9 +402,9 @@ export default function RegularReturnsCard2({ accounts, data }: Props) {
               <XAxis
                 dataKey="label"
                 type="category"
-                interval={0} // show ALL labels
+                interval={0}
                 allowDuplicatedCategory={false}
-                tick={<VerticalTick />} // rotate -90°
+                tick={<VerticalTick />}
                 height={68}
                 axisLine={false}
                 tickLine={false}

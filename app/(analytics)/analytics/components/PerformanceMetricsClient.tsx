@@ -1,6 +1,5 @@
 "use client";
 
-import { ChevronDown } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import CombinedPerformanceMTDCard from "./performance-metrics/combined-performance-metrics/CombinedPerformanceMTDCard";
@@ -96,8 +95,8 @@ export default function PerformanceMetricClient({
   payload,
   loading,
   error,
-  asOf,
-  fetchedAt,
+  asOf: _asOf,
+  fetchedAt: _fetchedAt,
 }: Props) {
   const [hasLoadedOnce, setHasLoadedOnce] = useState<boolean>(
     Boolean(payload) || Boolean(error)
@@ -127,7 +126,7 @@ export default function PerformanceMetricClient({
   }, [payload, accounts]);
 
   // Symbol PnL rows
-  const symbolRows: Bucket[] = useMemo(() => {
+  const symbolRows: Bucket[] = useMemo((): Bucket[] => {
     const symMap = payload?.symbolPnlMTD?.symbols ?? {};
     const out: Bucket[] = [];
     for (const [sym, vals] of Object.entries(symMap)) {
@@ -142,20 +141,6 @@ export default function PerformanceMetricClient({
     () => accounts.map((r) => ({ redisName: r, strategy: null })),
     [accounts]
   );
-
-  const accountsLabel = useMemo(
-    () => (accounts?.length ? accounts : ["fund2", "fund3"]).join(", "),
-    [accounts]
-  );
-
-  const pretty = useMemo(() => {
-    if (!payload) return '{\n  "status": "waiting for data..."\n}';
-    try {
-      return JSON.stringify(payload, null, 2);
-    } catch {
-      return String(payload);
-    }
-  }, [payload]);
 
   // Build realized series for charts from API
   const realizedSeriesFromApi = useMemo(
@@ -233,8 +218,6 @@ export default function PerformanceMetricClient({
     accounts,
   ]);
 
-  const [devOpen, setDevOpen] = useState<boolean>(false);
-
   // All-time realized drawdown values
   const currentDdAllTimeRealizedMap: Record<string, number> | undefined =
     payload?.all_time_max_current_dd?.realized?.current ?? undefined;
@@ -256,7 +239,7 @@ export default function PerformanceMetricClient({
   if (initialLoading) return <InitialLoadSkeleton />;
 
   return (
-    <div className="space-y-4">
+    <div className="gap-4 flex flex-col">
       <LiveUpnlStrip
         combined={combinedFiltered}
         perAccount={perFiltered}
@@ -264,96 +247,30 @@ export default function PerformanceMetricClient({
         window={payload?.meta?.window}
       />
       <div
-        className="grid gap-4"
+        className="grid"
         style={{
           gridTemplateColumns: "minmax(0, 1fr) minmax(220px, 10%)",
           alignItems: "start",
         }}
       >
-        <div className="space-y-4">
-          <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
+        <div>
+          {/* Ensure independent heights for these two cards */}
+          <div className="grid gap-4 grid-cols-1 lg:grid-cols-2 items-start">
             <CombinedPerformanceMTDCard
               bulk={combinedBulk}
               selected={accounts}
               combinedUpnl={payload?.uPnl?.combined ?? 0}
             />
-            <RegularReturnsBarGraph
-              accounts={accounts}
-              data={payload?.regular_returns ?? {}}
-            />
-          </div>
-
-          <div className="space-y-4">
-            <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
-              <CombinedPerformanceStratMTDCard
-                bulk={combinedBulk}
-                selected={accounts}
+            <div className="self-start">
+              <RegularReturnsBarGraph
+                accounts={accounts}
+                data={payload?.regular_returns ?? {}}
               />
-              <NetPnlList
-                rows={symbolRows}
-                selectedAccounts={accounts}
-                symbolBreakdownMap={payload?.symbolPnlMTD?.symbols}
-                window={payload?.meta?.window}
-              />
-            </div>
-          </div>
-
-          {/* Developer’s Tool */}
-          <div className="rounded-lg border bg-card text-card-foreground">
-            <button
-              type="button"
-              onClick={() => setDevOpen((v) => !v)}
-              aria-expanded={devOpen}
-              className="w-full flex items-center justify-between px-3 py-2 sm:px-4"
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium">Developer’s Tool</span>
-                <span className="text-xs text-muted-foreground">
-                  {devOpen ? "Hide" : "Show"}
-                </span>
-              </div>
-              <ChevronDown
-                className={`h-4 w-4 text-muted-foreground transition-transform ${
-                  devOpen ? "rotate-0" : "-rotate-90"
-                }`}
-              />
-            </button>
-
-            <div className="h-px w-full bg-border" />
-
-            <div
-              className={`transition-[max-height,opacity] duration-200 ease-out overflow-hidden ${
-                devOpen ? "opacity-100 max-h-[600px]" : "opacity-0 max-h-0"
-              }`}
-            >
-              <div className="p-3 sm:p-4 text-sm font-mono bg-muted/30">
-                <div className="mb-2 text-xs text-muted-foreground">
-                  Accounts: <span className="font-medium">{accountsLabel}</span>
-                </div>
-                <div className="mb-2 text-xs text-muted-foreground">
-                  API as_of: <span className="font-medium">{asOf ?? "—"}</span>{" "}
-                  • Fetched:{" "}
-                  <span className="font-medium">{fetchedAt ?? "—"}</span>
-                </div>
-
-                {error ? (
-                  <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
-                    {error}
-                  </div>
-                ) : null}
-
-                <div className="mt-2 max-h-[400px] overflow-y-auto rounded border bg-background px-3 py-2">
-                  <pre className="text-xs whitespace-pre-wrap break-all">
-                    {pretty}
-                  </pre>
-                </div>
-              </div>
             </div>
           </div>
         </div>
-
         {/* RIGHT COLUMN */}
-        <div className="row-span-2 grid gap-4">
+        <div className="row-span-2 grid gap-4 ml-4">
           <LosingDaysCard
             losingDays={payload?.losingDays}
             accounts={accountList}
@@ -369,6 +286,24 @@ export default function PerformanceMetricClient({
             maxRefLabel="All-time max"
             window={payload?.meta?.window}
           />
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        {/* Ensure independent heights for these two cards */}
+        <div className="grid gap-4 grid-cols-1 lg:grid-cols-2 items-start">
+          <CombinedPerformanceStratMTDCard
+            bulk={combinedBulk}
+            selected={accounts}
+          />
+          <div className="self-start">
+            <NetPnlList
+              rows={symbolRows}
+              selectedAccounts={accounts}
+              symbolBreakdownMap={payload?.symbolPnlMTD?.symbols}
+              window={payload?.meta?.window}
+            />
+          </div>
         </div>
       </div>
     </div>

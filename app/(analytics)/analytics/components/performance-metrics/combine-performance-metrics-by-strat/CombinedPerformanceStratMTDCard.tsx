@@ -1,4 +1,4 @@
-// app/(analytics)/analytics/components/performance-metrics/combined-performance-metrics/CombinedPerformanceStratMTDCard.tsx
+// app/(analytics)/analytics/components/performance-metrics/combine-performance-metrics-by-strat/CombinedPerformanceStratMTDCard.tsx
 "use client";
 
 import {
@@ -15,18 +15,12 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { SiBinance } from "react-icons/si";
 import DrawdownChart from "../combined-performance-metrics/DrawdownChart";
 import { ReturnChart } from "../combined-performance-metrics/ReturnChart";
 import type { BulkMetricsResponse } from "../combined-performance-metrics/types";
 
 /* ----------------------------- helpers ----------------------------- */
-
-function humanize(k: string): string {
-  return k.replace(/_/g, " ").trim();
-}
-function norm(k: string): string {
-  return humanize(k).toLowerCase();
-}
 
 type StrategyRow = {
   key: string;
@@ -38,65 +32,127 @@ type StrategyRow = {
   marginRet: number;
 };
 
-/* Small colored square (kept for per-strategy cards) */
-function Dot({ color, size = 10 }: { color: string; size?: number }) {
+function humanize(k: string): string {
+  return k.replace(/_/g, " ").trim();
+}
+
+/* Stable-ish palette for chips */
+const PALETTE = [
+  "#16a34a", // emerald-600
+  "#2563eb", // blue-600
+  "#dc2626", // red-600
+  "#9333ea", // purple-600
+  "#ea580c", // orange-600
+  "#0891b2", // cyan-600
+  "#ca8a04", // yellow-600
+  "#db2777", // pink-600
+  "#0d9488", // teal-600
+  "#4b5563", // gray-600
+];
+
+/* A compact, consistent metric pill (dot • icon • label • bold value) */
+function MetricPill({
+  dot,
+  icon,
+  label,
+  value,
+  valueTone, // "pos" | "neg" | "muted"
+}: {
+  dot: string;
+  icon?: React.ReactNode;
+  label: string;
+  value: string;
+  valueTone?: "pos" | "neg" | "muted";
+}) {
+  const toneCls =
+    valueTone === "pos"
+      ? "text-emerald-500"
+      : valueTone === "neg"
+        ? "text-red-500"
+        : "text-foreground";
   return (
-    <span
-      aria-hidden="true"
-      className="inline-block rounded-[3px]"
-      style={{ width: size, height: size, backgroundColor: color }}
-    />
+    <span className="inline-flex items-center gap-2 rounded-[10px] border bg-card/60 px-3 py-1 text-xs shadow-sm">
+      <span
+        aria-hidden
+        className="h-2.5 w-2.5 rounded-[3px]"
+        style={{ backgroundColor: dot }}
+      />
+      {icon ? (
+        <span aria-hidden className="mr-0.5">
+          {icon}
+        </span>
+      ) : null}
+      <span className="text-muted-foreground">{label}</span>
+      <span className={`font-semibold ${toneCls}`}>{value}</span>
+    </span>
   );
 }
 
-/* Pill-style Strategies badge (tooltip lists accounts per strategy) */
-function StrategiesBadge({ rows }: { rows: StrategyRow[] }) {
-  const count = rows.length;
-
+/* A tiny chip used inside the Strategies pill; responsive tooltip layout */
+function StrategyChip({
+  name,
+  color,
+  accounts,
+}: {
+  name: string;
+  color: string;
+  accounts: string[];
+}) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <span
-          className="inline-flex items-center gap-2 rounded-[6px] border bg-card/60 px-2.5 py-1 text-xs cursor-default"
-          title="Strategies"
-          aria-label="Strategies"
+          className="inline-flex items-center gap-2 rounded-[8px] border bg-background/40 px-2 py-[2px] text-xs shrink-0 max-w-[140px]"
+          title={name}
         >
           <span
-            aria-hidden="true"
-            className="inline-block rounded-[3px] bg-primary/85"
-            style={{ width: 10, height: 10 }}
+            aria-hidden
+            className="h-2.5 w-2.5 rounded-[3px]"
+            style={{ backgroundColor: color }}
           />
-          <span className="text-muted-foreground">Strategies</span>
-          <span className="font-semibold text-foreground">({count} Strat/s)</span>
+          <span className="truncate">{name}</span>
         </span>
       </TooltipTrigger>
 
+      {/* Responsive tooltip (no tab/indent; flex row that wraps) */}
       <TooltipContent
-        align="start"
         side="top"
-        className="p-2 rounded-[6px] border bg-popover text-popover-foreground text-xs"
+        align="start"
+        className="p-3 rounded-[8px] border bg-popover text-popover-foreground text-xs w-[min(56vw,420px)] max-w-[420px]"
       >
-        <div className="max-w-[360px]">
-          {count === 0 ? (
-            <div className="text-muted-foreground">None</div>
-          ) : (
-            rows.map((r) => {
-              const accounts = r.accounts.length ? r.accounts : ["—"];
-              return (
-                <div key={`tip-${r.key}`} className="mb-3 last:mb-0">
-                  <div className="font-bold">{r.name}</div>
-                  <div className="mt-1 text-xs space-y-0.5">
-                    <div className="tracking-wide text-muted-foreground">
-                      Accounts
-                    </div>
-                    <div className="break-words font-light text-accent-foreground">
-                      {accounts.join(", ")}
-                    </div>
-                  </div>
-                </div>
-              );
-            })
-          )}
+        {/* Title: colored dot + strategy name */}
+        <div className="mb-1.5 flex items-center gap-2">
+          <span
+            aria-hidden
+            className="h-2.5 w-2.5 rounded-[3px]"
+            style={{ backgroundColor: color }}
+          />
+          <span className="font-semibold text-sm">{name}</span>
+        </div>
+
+        <div className="flex flex-wrap gap-1.5">
+          <div className="flex items-center gap-2 text-muted-foreground shrink-0">
+            <SiBinance className="h-3.5 w-3.5 text-amber-400" />
+            <span className="font-medium">Accounts</span>
+            {accounts.length === 0 ? (
+              <span className="text-muted-foreground">—</span>
+            ) : (
+              accounts.map((a) => (
+                <span
+                  key={`${name}-acc-${a}`}
+                  className="inline-flex items-center gap-1.5 rounded-[999px] border bg-background/40 px-2 py-[2px] text-xs"
+                  style={{ boxShadow: `inset 0 0 0 1px ${color}55` }}
+                >
+                  <span
+                    aria-hidden
+                    className="h-2 w-2 rounded-[3px]"
+                    style={{ backgroundColor: color }}
+                  />
+                  <span className="font-medium">{a}</span>
+                </span>
+              ))
+            )}
+          </div>
         </div>
       </TooltipContent>
     </Tooltip>
@@ -131,7 +187,7 @@ export default function CombinedPerformanceStratMTDCard({
 
   // Selected accounts
   const selectedAccs = useMemo<string[]>(
-    () => (selected.length ? selected : bulk.accounts ?? []),
+    () => (selected.length ? selected : (bulk.accounts ?? [])),
     [selected, bulk.accounts]
   );
 
@@ -155,84 +211,77 @@ export default function CombinedPerformanceStratMTDCard({
       };
     });
 
-    // Sort: Janus first, then Adem, then alpha
-    const pri = new Set(["janus", "adem"]);
-    rows.sort((a, b) => {
-      const an = norm(a.key);
-      const bn = norm(b.key);
-      const ap = pri.has(an) ? 0 : 1;
-      const bp = pri.has(bn) ? 0 : 1;
-      if (ap !== bp) return ap - bp;
-      return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
-    });
-
     return rows;
   }, [bulk.performanceByStrategy, selectedAccs]);
 
-  // Stable color per strategy key for card headers
+  // Color map
   const colorMap = useMemo<Record<string, string>>(() => {
-    const palette = [
-      "#16a34a", // green-600
-      "#2563eb", // blue-600
-      "#dc2626", // red-600
-      "#9333ea", // purple-600
-      "#ea580c", // orange-600
-      "#0891b2", // cyan-600
-      "#ca8a04", // yellow-600
-      "#db2777", // pink-600
-      "#0d9488", // teal-600
-      "#4b5563", // gray-600
-    ];
     const map: Record<string, string> = {};
     strategies.forEach((s, i) => {
-      map[s.key] = palette[i % palette.length];
+      map[s.key] = PALETTE[i % PALETTE.length];
     });
     return map;
   }, [strategies]);
 
-  // Short, one-line description (fits without wrapping)
   const desc =
-    "Strategy returns & drawdowns for selected accounts — hover Strategies to see accounts.";
+    "Strategy returns & drawdowns for each strategy. Hover badge to see accounts.";
 
   return (
-    <Card ref={wrapRef} className="py-0">
+    <Card className="py-0">
       <CardHeader className="border-b !p-0">
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0 px-6 pt-2 sm:py-3 grid grid-rows-[auto_auto_auto] gap-2">
-            <CardTitle className="leading-tight">
-              Month-to-Date Performance by Strategy
-            </CardTitle>
+        <div className="px-4 sm:px-6 pt-2 pb-2 sm:pt-3 sm:pb-3">
+          <CardTitle className="leading-tight mb-2">
+            Month-to-Date Performance by Strategy
+          </CardTitle>
+          <CardDescription>{desc}</CardDescription>
 
-            <CardDescription
-              className="text-sm leading-snug truncate whitespace-nowrap"
-              title={desc}
-            >
-              {desc}
-            </CardDescription>
+          <TooltipProvider delayDuration={100}>
+            <div className="mt-1 flex items-center gap-2 overflow-x-auto flex-nowrap">
+              <span className="inline-flex items-center gap-2 rounded-[10px] border bg-card/60 px-2.5 py-1 text-xs">
+                <span
+                  aria-hidden
+                  className="h-2.5 w-2.5 rounded-[3px] bg-muted-foreground/60"
+                />
+                <span className="text-muted-foreground">Strategies</span>
 
-            <TooltipProvider delayDuration={150}>
-              <div className="flex flex-wrap items-center gap-2">
-                <StrategiesBadge rows={strategies} />
-              </div>
-            </TooltipProvider>
-          </div>
+                {/* chips (each with the updated tooltip) */}
+                <div className="flex items-center gap-2 flex-nowrap">
+                  {strategies.map((s, i) => (
+                    <StrategyChip
+                      key={`chip-${s.key}`}
+                      name={s.name}
+                      color={colorMap[s.key] ?? PALETTE[i % PALETTE.length]}
+                      accounts={s.accounts}
+                    />
+                  ))}
+                </div>
+              </span>
+            </div>
+          </TooltipProvider>
         </div>
       </CardHeader>
 
       <CardContent className="px-2 space-y-2 p-5">
-        {/* ======= Section: Return (title outside), then per-strategy cards ======= */}
+        {/* ======= Return per-strategy ======= */}
         <div className="text-sm sm:text-base font-medium text-foreground">
           Return
         </div>
 
         <div className="grid gap-4 mb-6">
-          {strategies.map((s) => (
+          {strategies.map((s, i) => (
             <div
               key={`ret-card-${s.key}`}
               className="rounded-md border bg-card/60"
             >
               <div className="flex items-center gap-2 px-3 pt-3">
-                <Dot color={colorMap[s.key] ?? "#4b5563"} size={10} />
+                <span
+                  aria-hidden
+                  className="inline-block rounded-[3px] h-2.5 w-2.5"
+                  style={{
+                    backgroundColor:
+                      colorMap[s.key] ?? PALETTE[i % PALETTE.length],
+                  }}
+                />
                 <div className="text-sm font-semibold">{s.name}</div>
               </div>
               <div className="px-2 sm:px-4 pb-4 pt-2">
@@ -254,19 +303,26 @@ export default function CombinedPerformanceStratMTDCard({
           ))}
         </div>
 
-        {/* ======= Section: Drawdown (title outside), then per-strategy cards ======= */}
+        {/* ======= Drawdown per-strategy ======= */}
         <div className="text-sm sm:text-base font-medium text-foreground">
           Drawdown
         </div>
 
         <div className="grid gap-4">
-          {strategies.map((s) => (
+          {strategies.map((s, i) => (
             <div
               key={`dd-card-${s.key}`}
               className="rounded-xl border bg-card/60"
             >
               <div className="flex items-center gap-2 px-3 pt-3">
-                <Dot color={colorMap[s.key] ?? "#4b5563"} size={10} />
+                <span
+                  aria-hidden
+                  className="inline-block rounded-[3px] h-2.5 w-2.5"
+                  style={{
+                    backgroundColor:
+                      colorMap[s.key] ?? PALETTE[i % PALETTE.length],
+                  }}
+                />
                 <div className="text-sm font-semibold">{s.name}</div>
               </div>
               <div className="px-2 sm:px-4 pb-4 pt-2">
