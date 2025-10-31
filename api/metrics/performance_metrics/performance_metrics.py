@@ -26,7 +26,7 @@ from ...core.config import now_utc_iso
 from ...db.baseline import read_unrealized_json
 from ...db.redis import read_upnl, upnl_payload
 from ...db.sql import nearest_balance_on_or_before
-from .calculations.all_time_dd import current_dd_test
+from .calculations.all_time_dd import current_max_dd
 from .calculations.drawdown import mtd_max_dd_from_levels
 from .calculations.equity import build_fixed_balances, build_margin_series
 from .calculations.losing_days import losing_days_mtd
@@ -39,7 +39,7 @@ from .calculations.returns import (
 )
 
 
-def _mtd_window_today() -> tuple[pd.Timestamp, pd.Timestamp, pd.Timestamp]:
+def _mtd_window_today() -> tuple[pd.Timestamp, pd.Timestamp]:
     """Return (start_of_month_local@00:00, today_local@00:00, yesterday_local@00:00).
 
     Europe/Zurich anchored. Returns tz-naive timestamps that preserve local wall times.
@@ -47,20 +47,13 @@ def _mtd_window_today() -> tuple[pd.Timestamp, pd.Timestamp, pd.Timestamp]:
     tz = ZoneInfo("Europe/Zurich")
 
     # Keep today's DATE, force TIME to 00:00:00 (tz-aware)
-    now_local = pd.Timestamp.now(tz=tz).replace(hour=0, minute=0, second=0, microsecond=0)
+    now_local = pd.Timestamp.now(tz=tz).replace(microsecond=0)
 
     # First of this month, TIME 00:00:00 (tz-aware). Date remains the 1st.
-    start_local = now_local.replace(day=1)
-
-    # Yesterday at 00:00:00 (tz-aware)
-    yesterday_local = now_local - pd.Timedelta(days=1)
+    start_local = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     # Make tz-naive WITHOUT changing wall times
-    return (
-        start_local.tz_localize(None),
-        now_local.tz_localize(None),
-        yesterday_local.tz_localize(None),
-    )
+    return (start_local.tz_localize(None), now_local.tz_localize(None))
 
 
 def _serialize_series(df: pd.DataFrame, accounts: list[str]) -> dict[str, dict[str, float]]:
@@ -341,7 +334,7 @@ def _group_accounts_by_strategy(
 def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
     """Return the full metrics payload for requested accounts."""
     accs = [a.strip().lower() for a in accounts if a.strip()]
-    start_day, today, _yesterday = _mtd_window_today()
+    start_day, today = _mtd_window_today()
     print(f"start_day = {start_day}")
     print(f"today = {today}")
 
@@ -401,8 +394,8 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
     mdd_margin = mtd_max_dd_from_levels(margin_total) if not margin_total.empty else {}
 
     # Losing days and PnL by symbol
-    losing = losing_days_mtd(accs, day_start_hour=8)
-    symbols, totals_by_acc = pnl_by_symbol_mtd(accs, str(start_day.date()), str(today.date()))
+    losing = losing_days_mtd(accs, day_start_hour=8, start_day=start_day, today=today)
+    symbols, totals_by_acc = pnl_by_symbol_mtd(accs, start_day.isoformat(" "), str(today.isoformat(" ")))
 
     # Serialize equity blocks
     realized_series = (
@@ -498,19 +491,19 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
 
     # Regular returns + all-time DD
     regular_df = regular_returns_by_session(
-        accs, start_day, today, day_start_hour=8, tz="Asia/Manila"
+        accs, start_day, today, day_start_hour=8, tz="Europe/Zurich"
     )
     regular_returns = _serialize_series(regular_df, accs) if not regular_df.empty else {}
     # all_time_dd = compute_all_time_max_current_dd(accs)
-    current_dd = current_dd_test(accs, oct_start=start_day, end_day=today)
+    current_dd_val, max_dd_val = current_max_dd(accs, oct_start=start_day, end_day=today)
 
     payload: dict[str, object] = {
         "meta": {
             "asOf": now_utc_iso(),
             "window": {
                 "mode": "MTD",
-                "startDay": str(start_day.date()),
-                "endDay": str(today.date()),
+                "startDay": str(start_day.isoformat(" ")),
+                "endDay": str(today.isoformat(" ")),
             },
             "flags": {
                 "missingInitialBalanceAccounts": [],
@@ -544,8 +537,8 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
         "regular_returns": regular_returns,
         "all_time_max_current_dd": {
             "realized": {
-                "current": {"total": float(current_dd)},
-                "max": {"total": float(current_dd)},  # use current for max as well
+                "current": {"total": float(current_dd_val)},
+                "max": {"total": float(max_dd_val)},
             }
         },
     }

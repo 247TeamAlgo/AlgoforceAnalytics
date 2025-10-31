@@ -98,21 +98,24 @@ def _last_complete_label(now: pd.Timestamp, day_start_hour: int) -> pd.Timestamp
         return today - pd.Timedelta(days=2)
 
 
-def losing_days_mtd(accounts: list[str], day_start_hour: int) -> dict[str, object]:
+def losing_days_mtd(
+    accounts: list[str], day_start_hour: int, start_day: pd.Timestamp, today: pd.Timestamp
+) -> dict[str, object]:
     """Compute per-account and combined losing streaks for MTD, using complete 08:00-cut days only."""
-    now = pd.Timestamp.now()  # naive local; aligns with DB local usage
-    today = now.normalize()
-    month_start = today.replace(day=1)
+    # now = pd.Timestamp.now()  # naive local; aligns with DB local usage
+    # today = now.normalize()
+    # month_start = today.replace(day=1)
 
     # Determine the latest *complete* shifted-day label were allowed to include.
-    last_complete = _last_complete_label(now, day_start_hour)
-    if last_complete is None or last_complete < month_start:
+    last_complete = _last_complete_label(today, day_start_hour)
+    # print(f"last_complete={last_complete} month_start={start_day}")
+    if last_complete is None or last_complete < start_day:
         # Nothing complete yet this month (e.g., early morning on the 1st/2nd before the cut).
         return {"perAccount": {}, "combined": {"consecutive": 0, "days": {}}}
 
     # Build the index we will allow (month_start .. last_complete).
     idx_end = last_complete
-    full_idx = pd.date_range(month_start, idx_end, freq="D")
+    full_idx = pd.date_range(start_day, idx_end, freq="D")
 
     # Combined series (sum of daily PnL across accounts)
     combined_daily = pd.Series(0.0, index=full_idx, dtype="float64")
@@ -124,10 +127,10 @@ def losing_days_mtd(accounts: list[str], day_start_hour: int) -> dict[str, objec
         # but _daily_trades_net will reindex to full_idx (capping at last_complete).
         df = read_trades(
             a,
-            f"{month_start.date()} 00:00:00",
-            now.strftime("%Y-%m-%d %H:%M:%S"),
+            f"{start_day.date()} 00:00:00",
+            today.strftime("%Y-%m-%d %H:%M:%S"),
         )
-        daily = _daily_trades_net(df, month_start, idx_end, day_start_hour)
+        daily = _daily_trades_net(df, start_day, idx_end, day_start_hour)
         streak, tail = _streak_from_series(daily, eps=1e-9)
 
         per[a] = {

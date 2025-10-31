@@ -1,17 +1,21 @@
+# process_df.py
 from __future__ import annotations
 
-from typing import Iterable, Optional
+from collections.abc import Iterable
+
 import pandas as pd
+
+from ....db.redis_v2 import wallet_balance
 
 # helpers
 from ....db.sql_v2 import get_data
-from ....db.redis_v2 import wallet_balance
+
 
 def process_df(
     accs: str | Iterable[str],
     start_date: str | pd.Timestamp,
     end_date: str | pd.Timestamp,
-) -> tuple[dict[str, dict[str, pd.DataFrame]], Optional[pd.DataFrame], Optional[pd.DataFrame]]:
+) -> tuple[dict[str, dict[str, pd.DataFrame]], pd.DataFrame, pd.DataFrame]:
     # --- normalize inputs ---
     acc_list = [accs] if isinstance(accs, str) else list(accs)
     results: dict[str, dict[str, pd.DataFrame]] = {}
@@ -47,16 +51,24 @@ def process_df(
 
         # --- window the ledgers ---
         trades_f = trades.loc[(trades["time"] >= new_start_ts) & (trades["time"] <= end_ts)].copy()
-        trnsc_f = trnsc_history.loc[(trnsc_history["time"] >= new_start_ts) & (trnsc_history["time"] <= end_ts)].copy()
-        earnings_f = earnings.loc[(earnings["time"] >= new_start_ts) & (earnings["time"] <= end_ts)].copy()
+        trnsc_f = trnsc_history.loc[
+            (trnsc_history["time"] >= new_start_ts) & (trnsc_history["time"] <= end_ts)
+        ].copy()
+        earnings_f = earnings.loc[
+            (earnings["time"] >= new_start_ts) & (earnings["time"] <= end_ts)
+        ].copy()
 
         # realized pnl net of fees
-        trades_f["dollar_val"] = trades_f["realizedPnl"].astype(float) - trades_f["commission"].astype(float)
+        trades_f["dollar_val"] = trades_f["realizedPnl"].astype(float) - trades_f[
+            "commission"
+        ].astype(float)
         trades_f["transaction_type"] = "realizedPnl"
         trades_df = trades_f[["time", "dollar_val", "transaction_type"]]
 
         # funding fees from transactions
-        trnsc_funding = trnsc_f.loc[trnsc_f["incomeType"].astype(str).str.upper() == "FUNDING_FEE"].copy()
+        trnsc_funding = trnsc_f.loc[
+            trnsc_f["incomeType"].astype(str).str.upper() == "FUNDING_FEE"
+        ].copy()
         trnsc_funding["dollar_val"] = trnsc_funding["income"].astype(float)
         trnsc_funding["transaction_type"] = "funding_fee"
         funding_df = trnsc_funding[["time", "dollar_val", "transaction_type"]]
@@ -88,11 +100,17 @@ def process_df(
 
         # recompute running balance from start
         ledger_final = ledger.loc[ledger["time"] >= start_ts].copy()
-        ledger_final["running_balance"] = initial_balance_at_start + ledger_final["dollar_val"].cumsum()
-        ledger_final = ledger_final.loc[ledger_final["transaction_type"] != "transfer"].reset_index(drop=True)
+        ledger_final["running_balance"] = (
+            initial_balance_at_start + ledger_final["dollar_val"].cumsum()
+        )
+        ledger_final = ledger_final.loc[ledger_final["transaction_type"] != "transfer"].reset_index(
+            drop=True
+        )
 
         # daily last balance
-        daily_balances = ledger_final.groupby(ledger_final["time"].dt.floor("D"))["running_balance"].last()
+        daily_balances = ledger_final.groupby(ledger_final["time"].dt.floor("D"))[
+            "running_balance"
+        ].last()
         daily_balances.index.name = "date"
 
         # inject UPnL into most recent day
@@ -105,17 +123,14 @@ def process_df(
         peaks = peaks.replace(0.0, pd.NA)  # avoid div-by-zero
         daily_drawdowns = (daily_balances - peaks) / peaks
 
-        daily_report = (
-            pd.DataFrame(
-                {
-                    "end_balance": daily_balances.values,
-                    "daily_return": daily_returns.values,
-                    "daily_drawdown": daily_drawdowns.values,
-                },
-                index=daily_balances.index,
-            )
-            .reset_index(names="date")
-        )
+        daily_report = pd.DataFrame(
+            {
+                "end_balance": daily_balances.values,
+                "daily_return": daily_returns.values,
+                "daily_drawdown": daily_drawdowns.values,
+            },
+            index=daily_balances.index,
+        ).reset_index(names="date")
 
         # --- Monthly stats via resample (sidestep strftime typing) ---
         dr_idx = daily_report.set_index("date")
@@ -123,7 +138,9 @@ def process_df(
         monthly_stats = monthly.apply(
             lambda dfm: pd.Series(
                 {
-                    "monthly_return": float(dfm["end_balance"].iloc[-1] / dfm["end_balance"].iloc[0] - 1.0),
+                    "monthly_return": float(
+                        dfm["end_balance"].iloc[-1] / dfm["end_balance"].iloc[0] - 1.0
+                    ),
                     "monthly_drawdown": float(dfm["daily_drawdown"].min()),
                 }
             )
@@ -134,8 +151,8 @@ def process_df(
         results[acc] = {"daily": daily_report, "monthly": monthly_report}
 
     # --- Combined portfolio (deterministic construction; no None narrowing issues) ---
-    combined_daily: Optional[pd.DataFrame] = None
-    combined_monthly: Optional[pd.DataFrame] = None
+    combined_daily: pd.DataFrame
+    combined_monthly: pd.DataFrame
 
     if len(acc_list) > 1:
         series_list: list[pd.Series] = [
@@ -143,11 +160,17 @@ def process_df(
             for a in acc_list
         ]
         if series_list:
-            combined = pd.concat(series_list, axis=1).sort_index().ffill()  # <- use ffill(), not fillna(method="ffill")
+            combined = (
+                pd.concat(series_list, axis=1).sort_index().ffill()
+            )  # <- use ffill(), not fillna(method="ffill")
             combined["end_balance_combined"] = combined.sum(axis=1, numeric_only=True)
-            combined["daily_return_combined"] = combined["end_balance_combined"].pct_change().fillna(0.0)
+            combined["daily_return_combined"] = (
+                combined["end_balance_combined"].pct_change().fillna(0.0)
+            )
             c_peaks = combined["end_balance_combined"].cummax().replace(0.0, pd.NA)
-            combined["daily_drawdown_combined"] = (combined["end_balance_combined"] - c_peaks) / c_peaks
+            combined["daily_drawdown_combined"] = (
+                combined["end_balance_combined"] - c_peaks
+            ) / c_peaks
 
             combined_daily = combined.reset_index().rename(columns={"index": "date"})
 
@@ -156,7 +179,9 @@ def process_df(
                 lambda dfm: pd.Series(
                     {
                         "monthly_return_combined": float(
-                            dfm["end_balance_combined"].iloc[-1] / dfm["end_balance_combined"].iloc[0] - 1.0
+                            dfm["end_balance_combined"].iloc[-1]
+                            / dfm["end_balance_combined"].iloc[0]
+                            - 1.0
                         ),
                         "monthly_drawdown_combined": float(dfm["daily_drawdown_combined"].min()),
                     }

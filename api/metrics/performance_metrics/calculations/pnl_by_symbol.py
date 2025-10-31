@@ -16,7 +16,7 @@ def pnl_by_symbol_mtd(
     """Aggregate realized PnL per symbol across accounts."""
     frames: list[pd.Series] = []
     for a in accounts:
-        df = read_trades(a, f"{start_day_iso} 00:00:00", f"{end_day_iso} 23:59:59")
+        df = read_trades(a, start_day_iso, end_day_iso)
         if df.empty:
             continue
         use = df.loc[:, ["symbol", "realizedPnl"]].copy()
