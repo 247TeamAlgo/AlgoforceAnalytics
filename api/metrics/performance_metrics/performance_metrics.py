@@ -26,7 +26,7 @@ from ...core.config import now_utc_iso
 from ...db.baseline import read_unrealized_json
 from ...db.redis import read_upnl, upnl_payload
 from ...db.sql import nearest_balance_on_or_before
-from .calculations.all_time_dd import compute_all_time_max_current_dd
+from .calculations.all_time_dd import current_dd_test
 from .calculations.drawdown import mtd_max_dd_from_levels
 from .calculations.equity import build_fixed_balances, build_margin_series
 from .calculations.losing_days import losing_days_mtd
@@ -37,8 +37,6 @@ from .calculations.returns import (
     live_return_realized,
     mtd_return,
 )
-
-# ---------- Small, typed helpers ----------
 
 
 def _mtd_window_today() -> tuple[pd.Timestamp, pd.Timestamp, pd.Timestamp]:
@@ -500,10 +498,11 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
 
     # Regular returns + all-time DD
     regular_df = regular_returns_by_session(
-        accs, start_day, today, day_start_hour=8, tz="Europe/Zurich"
+        accs, start_day, today, day_start_hour=8, tz="Asia/Manila"
     )
     regular_returns = _serialize_series(regular_df, accs) if not regular_df.empty else {}
-    all_time_dd = compute_all_time_max_current_dd(accs)
+    # all_time_dd = compute_all_time_max_current_dd(accs)
+    current_dd = current_dd_test(accs, oct_start=start_day, end_day=today)
 
     payload: dict[str, object] = {
         "meta": {
@@ -541,9 +540,13 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
         "losingDays": losing,
         "symbolPnlMTD": {"symbols": symbols, "totalPerAccount": totals_by_acc},
         "uPnl": upnl_payload(accs),
-        # Renamed: dynamic, JSON-driven strategy aggregation
         "performanceByStrategy": performance_by_strategy,
         "regular_returns": regular_returns,
-        "all_time_max_current_dd": all_time_dd,
+        "all_time_max_current_dd": {
+            "realized": {
+                "current": {"total": float(current_dd)},
+                "max": {"total": float(current_dd)},  # use current for max as well
+            }
+        },
     }
     return payload

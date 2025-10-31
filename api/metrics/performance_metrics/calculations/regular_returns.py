@@ -14,11 +14,11 @@ def _sessionize_sum(
     s: Series,
     *,
     day_start_hour: int = 8,
-    tz: str = "Europe/Zurich",
+    tz: str = "Asia/Manila",
 ) -> Series:
     """Sum a timestamp-indexed Series into 'trading days' that start at `day_start_hour` local.
 
-    Mapping (Europe/Zurich):
+    Mapping (Asia/Manila):
       08:00 .. next-day 07:59  -> labeled by the start date (e.g., 2025-10-19).
       <= 07:59 of a calendar day -> rolls back to previous trading day.
     """
