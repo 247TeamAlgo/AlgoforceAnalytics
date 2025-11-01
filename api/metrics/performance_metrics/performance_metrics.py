@@ -44,13 +44,16 @@ def _mtd_window_today() -> tuple[pd.Timestamp, pd.Timestamp]:
 
     Europe/Zurich anchored. Returns tz-naive timestamps that preserve local wall times.
     """
-    tz = ZoneInfo("Europe/Zurich")
+    tz = ZoneInfo("Asia/Manila")
 
     # Keep today's DATE, force TIME to 00:00:00 (tz-aware)
     now_local = pd.Timestamp.now(tz=tz).replace(microsecond=0)
 
     # First of this month, TIME 00:00:00 (tz-aware). Date remains the 1st.
-    start_local = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    # start_local = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    # start_local = start_local - pd.Timedelta(days=1)
+    # start_local.replace(hour=8, minute=0, second=0, microsecond=0)
+    start_local = (now_local + pd.offsets.MonthEnd(-1)).normalize() + pd.Timedelta(hours=8)
 
     # Make tz-naive WITHOUT changing wall times
     return (start_local.tz_localize(None), now_local.tz_localize(None))
@@ -395,7 +398,9 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
 
     # Losing days and PnL by symbol
     losing = losing_days_mtd(accs, day_start_hour=8, start_day=start_day, today=today)
-    symbols, totals_by_acc = pnl_by_symbol_mtd(accs, start_day.isoformat(" "), str(today.isoformat(" ")))
+    symbols, totals_by_acc = pnl_by_symbol_mtd(
+        accs, start_day.isoformat(" "), str(today.isoformat(" "))
+    )
 
     # Serialize equity blocks
     realized_series = (
@@ -491,7 +496,7 @@ def build_metrics_payload(accounts: Sequence[str]) -> dict[str, object]:
 
     # Regular returns + all-time DD
     regular_df = regular_returns_by_session(
-        accs, start_day, today, day_start_hour=8, tz="Europe/Zurich"
+        accs, start_day, today, day_start_hour=8, tz="Asia/Manila"
     )
     regular_returns = _serialize_series(regular_df, accs) if not regular_df.empty else {}
     # all_time_dd = compute_all_time_max_current_dd(accs)
